@@ -49,7 +49,7 @@ export function generateDeposits(seed: string, T: Terrain, G: Geology, culture: 
     const [x, y] = cellCenter(c);
     const d: Deposit = {
       id: `D${out.length + 1}`, kind, name: '', cell: c, x: x + r.float(-0.4, 0.4) * CELL, y: y + r.float(-0.4, 0.4) * CELL,
-      formation: f.id, ageMa: f.ageMa, process: '', minerals: { primary: [], gangue: [], supergene: [] }, commodity: '', tonnage: 0, grade: 0, gradeUnit: '',
+      formation: G.formationOf[c], ageMa: extra.ageMa ?? f.ageMa, process: '', minerals: { primary: [], gangue: [], supergene: [] }, commodity: '', tonnage: 0, grade: 0, gradeUnit: '',
       viableFrom: null, surfaceRadius: 200, expression: '', alteration: '', depthToTop: 0, bulk: false, ...extra,
     };
     out.push(d); taken.push(c); return d;
@@ -159,7 +159,7 @@ export function generateDeposits(seed: string, T: Terrain, G: Geology, culture: 
       if (!inb(x, y)) continue; const c = idx(x, y); if (!landOK(c) || !spaced(c, 3)) continue;
       pushDep('pegmatite', c, f, {
         process: 'Water-rich residual melt from the cooling granite crystallised slowly into coarse dikes in the surrounding rock', plutonId: pl.id,
-        minerals: { primary: ['quartz', 'microcline', 'muscovite', 'tourmaline'], gangue: ['quartz'], supergene: [] }, commodity: 'gem and industrial minerals',
+        ageMa: f.ageMa, minerals: { primary: ['quartz', 'microcline', 'muscovite', 'tourmaline'], gangue: ['quartz'], supergene: [] }, commodity: 'gem and industrial minerals',
         tonnage: gradeOf(2e4, 1.0), grade: 1, gradeUnit: 'n/a', expression: 'Pale coarse-grained dikes with crystals many centimetres across', alteration: 'Albitisation of the wall rock', surfaceRadius: 90 + r.float(0, 90), depthToTop: 0,
       });
       const d = out[out.length - 1];

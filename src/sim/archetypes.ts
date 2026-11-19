@@ -24,7 +24,7 @@ export const ARCHETYPES: Archetype[] = [
   A('coin_cupronickel','copper-nickel coin','coin','coin',1866,null,'cupronickel:3,nickel:1',[2.5,12],[17,31],'street:2,shop:2.5,road:1.5,home:1.4,play:1.5,school:1,beach:1,wharf:1,rail:1,camp:1,modern:2,trail:0.5',3.0,6,0.4,1,'A hard-wearing nickel-alloy coin.',{special:'coin',dated:true}),
   A('bullion_bar','cast gold bar','coin','bar',1624,null,'gold',[300,6000],[80,200],'home:0',0,50,6000,5,'A cast bar of gold, stamped by the mine that poured it.',{special:'hoard',marked:1,dated:true}),
   // ---------------- tokens
-  A('token_scrip','company scrip token','token','disc',1700,1955,'brass:3,aluminium:1,zinc:1,copper:1',[1.5,9],[18,32],'street:2,shop:2.5,works:2.5,mine:3,home:1.2,camp:2,rail:1,play:0.6',0.6,8,3,3,'A token issued by a firm, good for goods at its own store.',{special:'token',dated:true,marked:1}),
+  A('token_scrip','company scrip token','token','disc',1620,null,'brass:3,aluminium:1,zinc:1,copper:1',[1.5,9],[18,32],'street:2,shop:2.5,works:2.5,mine:3,home:1.2,camp:2,rail:1,play:0.6',0.6,8,3,3,'A token issued by a firm, good for goods at its own store.',{special:'token',dated:true,marked:1}),
   A('token_transit','transit token','token','disc',1885,1985,'brass:2,aluminium:1,cupronickel:1',[1.2,4],[14,22],'street:2.5,rail:2,wharf:1,modern:0.5',0.35,5,1.5,1.4,'A fare token for the street railway or ferry.',{special:'token',marked:1}),
   A('token_trade','tradesman\'s token','token','disc',1624,1840,'copper:3,brass:1',[4,16],[20,30],'street:1.5,shop:2,road:1,wharf:1',0.2,12,6,2,'A copper trade token passing as small change in times of coin shortage.',{special:'token',dated:true,marked:1}),
   // ---------------- jewellery

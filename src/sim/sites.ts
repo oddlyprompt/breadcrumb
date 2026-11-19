@@ -52,7 +52,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
 
   // ---------------- towns, camps, forts
   for (const s of H.settlements) {
-    const end = s.abandoned ?? END; const r0 = new Rng(hash32(seed + '|town|' + s.id));
+    const end = Math.min(s.abandoned ?? END, END); const r0 = new Rng(hash32(seed + '|town|' + s.id));
     if (s.kind === 'farmstead') continue;
     const peak = Math.max(s.peak, 10);
     const radius = s.kind === 'seasonal_camp' ? s.radius : Math.min(650, 60 + Math.sqrt(peak) * 7);
@@ -169,7 +169,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
 
   // ---------------- farms
   for (const f of H.settlements) {
-    if (f.kind !== 'farmstead') continue; const end = f.abandoned ?? END; const r0 = new Rng(hash32(seed + '|farm|' + f.id));
+    if (f.kind !== 'farmstead') continue; const end = Math.min(f.abandoned ?? END, END); const r0 = new Rng(hash32(seed + '|farm|' + f.id));
     const cur = f.abandoned === undefined;
     const fam = (f as any).family as string;
     const farm = mkSite('farm', cur ? `${f.name}stead` : `Site of ${f.name}`, f.x, f.y, 55, { refs: { settlement: f.id, farm: f.id }, from: f.founded, to: f.abandoned ?? null, access: cur ? 'builtup' : 'public', ctxLabel: 'farmstead', densityMult: cur ? 0 : 1 });
@@ -191,7 +191,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
 
   // ---------------- mines and diggings
   for (const m of H.mines) {
-    const town = S.get(m.settlement)!; const dep = D.deposits.find(d => d.id === m.deposit)!; const end = m.closed ?? END; const r0 = new Rng(hash32(seed + '|mine|' + m.id));
+    const town = S.get(m.settlement)!; const dep = D.deposits.find(d => d.id === m.deposit)!; const end = Math.min(END, m.closed ?? END); const r0 = new Rng(hash32(seed + '|mine|' + m.id));
     const rad = m.tailingsRadius + 40;
     const site = mkSite('mine', `${m.claimName}`, m.x, m.y, rad, { refs: { mine: m.id, settlement: town.id, deposit: m.deposit, business: m.company }, from: m.opened, to: m.closed ?? null, ctxLabel: 'mine workings' });
     const workers = (y: number) => m.method === 'open_pit' ? 120 : m.method === 'quarry' ? 25 : 40 + 30 * Math.min(3, H.econ[Math.max(0, y - H.startYear)] ?? 1);
@@ -216,7 +216,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
   // ---------------- works (businesses with plant)
   const WORKS: string[] = ['sawmill', 'mill', 'foundry', 'brickworks', 'glassworks', 'cannery', 'bottler', 'brewery', 'tannery', 'pottery', 'quarry', 'lime_kiln', 'button_works', 'tin_shop', 'garage'];
   for (const b of H.businesses) {
-    if (!WORKS.includes(b.kind) || b.scale < 2) continue; const s = S.get(b.settlement)!; const end = b.closed ?? END;
+    if (!WORKS.includes(b.kind) || b.scale < 2) continue; const s = S.get(b.settlement)!; const end = Math.min(END, b.closed ?? END);
     const cur = s.current; const local = new Rng(hash32(seed + '|biz|' + b.id));
     const reveal = !cur || hash01(hash32(b.id), 5) < 0.35 || b.kind === 'quarry' || b.kind === 'lime_kiln';
     if (!reveal) continue; if (b.closed === undefined && cur) continue; // a working factory in a living town is not searchable
@@ -232,7 +232,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
   // ---------------- routes
   const SEG = 1000;
   for (const rt of H.routes) {
-    const end = rt.kind === 'railway' ? (rt.lifted ?? END) : rt.closed ?? END; const start = rt.kind === 'railway' ? (rt.opened ?? rt.built) : rt.built;
+    const end = Math.min(END, rt.kind === 'railway' ? (rt.lifted ?? END) : rt.closed ?? END); const start = rt.kind === 'railway' ? (rt.opened ?? rt.built) : rt.built;
     const a = S.get(rt.from)!, b = S.get(rt.to)!;
     const pts = rt.pts; let acc = 0, seg: Array<[number, number]> = [pts[0]]; let segIdx = 0; const segs: Array<Array<[number, number]>> = [];
     for (let i = 1; i < pts.length; i++) { acc += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(pts[i]); if (acc >= SEG) { segs.push(seg); seg = [pts[i]]; acc = 0; } }
@@ -244,7 +244,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
       const length = sp.reduce((t, p, i) => i ? t + Math.hypot(p[0] - sp[i - 1][0], p[1] - sp[i - 1][1]) : t, 0);
       const traffic = (y: number) => { const pp = (popAt(a, y, H.startYear) + popAt(b, y, H.startYear)); return rt.kind === 'railway' ? 3000 + pp * 0.3 : Math.max(60, pp * (y < 1910 ? 0.12 : 0.18)); };
       site.acts = decades(start, end, (x0, x1) => [{ ctx: rt.kind === 'railway' ? 'rail' as Ctx : 'road' as Ctx, from: x0, to: x1, n: traffic(x0) * length / 1000 / 5, note: rt.kind === 'railway' ? 'trains and track gangs' : 'carts, riders and walkers' }]);
-      if (end >= 1960 && !rt.closed && rt.kind !== 'railway') site.acts.push({ ctx: 'modern', from: 1960, to: END, n: traffic(2000) * length / 1000 / 8, note: 'passing motorists' });
+      if (end >= 1960 && !rt.closed && rt.kind !== 'railway') site.acts.push({ ctx: 'modern', from: Math.max(1960, start), to: END, n: traffic(2000) * length / 1000 / 8, note: 'passing motorists' });
       if (rt.closed || rt.lifted) site.acts.push({ ctx: 'trail', from: Math.max(end, 1950), to: END, n: 4 * length / 1000, note: 'walkers on the old route' });
       const lineSpots = Math.max(3, Math.round(length / 28));
       for (let i = 0; i < lineSpots; i++) { const t = (i + 0.5) / lineSpots; const k = Math.min(sp.length - 2, Math.floor(t * (sp.length - 1))); const f2 = t * (sp.length - 1) - k; const x = sp[k][0] + (sp[k + 1][0] - sp[k][0]) * f2, y = sp[k][1] + (sp[k + 1][1] - sp[k][1]) * f2;
@@ -266,7 +266,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
   }
   // ---------------- crossings
   for (const x of H.crossings) {
-    const rt = H.routes.find(q => q.id === x.route)!; const end = rt.closed ?? rt.lifted ?? END; const s0 = x.built;
+    const rt = H.routes.find(q => q.id === x.route)!; const end = Math.min(END, rt.closed ?? rt.lifted ?? END); const s0 = x.built;
     const site = mkSite('ford', `${x.kind === 'ferry' ? 'Ferry landing' : x.kind === 'bridge' ? 'Bridge' : 'Ford'} on the ${rt.name}`, x.x, x.y, 45, { refs: { crossing: x.id, route: rt.id }, from: s0, to: end >= END ? null : end, ctxLabel: x.kind === 'ferry' ? 'ferry landing' : 'river crossing', dynamic: 'river' });
     const trafficF = Math.max(80, (S.get(rt.from)!.peak + S.get(rt.to)!.peak) * 0.12);
     site.acts = decades(s0, end, (a, b) => [{ ctx: 'ford' as Ctx, from: a, to: b, n: trafficF * (rt.kind === 'railway' ? 0.2 : 1), note: 'travellers crossing' }]);
@@ -327,6 +327,8 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
       if (s && s.port && a < 1960) out.push({ ctx: 'wharf' as Ctx, from: a, to: b, n: p * 0.12, note: 'boats pulled up on the shore' }); if (a >= 1960) out.push({ ctx: 'modern' as Ctx, from: a, to: b, n: 140 + p * 0.1, note: 'visitors' }); return out; });
     site.spots = [{ ctx: ['beach', 'wharf', 'modern'], x: site.x, y: site.y, r: 60, w: 1, kind: 'high-tide line', depth: [0, 28] }];
   }
+  // a site's life is the span of its activity (so no object can be dated outside it)
+  for (const st of sites) { if (!st.acts.length || st.special) continue; st.from = Math.min(...st.acts.map(a => a.from)); const mx = Math.max(...st.acts.map(a => a.to)); st.to = mx >= END ? null : mx; }
   // ----------- index
   const chunks = new Map<number, number[]>(); const byId = new Map<string, Site>();
   sites.forEach((s, i) => {

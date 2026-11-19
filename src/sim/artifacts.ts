@@ -143,7 +143,7 @@ function makeArtifact(w: World, I: Idx, site: Site, a: Archetype, ctx: Ctx, dep:
     const pool = cands.filter(t => t.from <= dep && dep <= t.to + 8); if (!pool.length) return null;
     const tot = pool.reduce((s: number, t: any) => s + t.mintage, 0); let x = r.next() * tot; let t = pool[0]; for (const c of pool) { x -= c.mintage; if (x <= 0) { t = c; break; } }
     const b = H.businesses.find(q => q.id === t.business)!;
-    token = t.id; maker = b.id; produced = Math.max(t.from, Math.min(dep, t.from + Math.floor(r.next() * (t.to - t.from + 1)))); mat = t.metal; L0 = 20 + t.value * 0.3 + r.float(-1, 1); mass = MAT[mat].density * Math.PI * (L0 / 20) ** 2 * 0.9 * 1.3;
+    token = t.id; maker = b.id; produced = Math.max(t.from, Math.min(dep, t.to, t.from + Math.floor(r.next() * (t.to - t.from + 1)))); mat = t.metal; L0 = 20 + t.value * 0.3 + r.float(-1, 1); mass = MAT[mat].density * Math.PI * (L0 / 20) ** 2 * 0.9 * 1.3;
     marks.push(...t.lines.map((l: string, i: number) => ({ text: l, kind: (i === 0 ? 'maker' : i === 1 ? 'name' : 'denom') as Mark['kind'], need: 0.35 + i * 0.05 })), { text: String(produced), kind: 'date', need: 0.5 });
     origin = `${b.name} of ${H.settlements.find(s => s.id === b.settlement)!.name}`; assoc.business = b.id; assoc.settlement = b.settlement; wear = clamp((dep - produced) / 40 * 0.5, 0, 0.7); special = 'token';
   } else if (a.special === 'medal' && a.id === 'medal_event') {
@@ -211,8 +211,10 @@ function specials(w: World, I: Idx, site: Site, out: Artifact[], r: Rng, next: (
     const mat1 = o.mat ?? chooseMaterial(a, o.produced ?? dep, r); if (!mat1) return null; const mat: string = mat1;
     let mass = o.mass ?? a.mass[0] * Math.pow(a.mass[1] / a.mass[0], r.next()); let L0 = a.size[0] * Math.pow(a.size[1] / a.size[0], r.next());
     let marks = o.marks ?? []; let produced = o.produced ?? Math.max(a.from, dep - r.int(0, 10)); let series: string | undefined = o.series?.id; let wear = 0;
+    if (!o.series) { if (o.assoc.persons?.length) { const pr = H.people.find(q => q.id === o.assoc.persons![0]); if (pr) produced = Math.max(produced, pr.born + 3); } if (a.to !== null && produced > a.to) produced = a.to; if (produced > dep) produced = dep; if (produced < a.from) return null; if (!matAvailable(mat, produced)) return null; }
     if (o.series) { const s = o.series; const T = w.coin.types.find(t => t.id === s.type)!; produced = s.year; marks = [{ text: T.legend, kind: 'legend', need: 0.35 }, { text: s.denomText, kind: 'denom', need: 0.3 }, { text: String(s.year), kind: 'date', need: 0.45 }, { text: T.obverse, kind: 'motif', need: 0.25 }]; mass = s.massG; L0 = s.diameter; wear = clamp((dep - s.year) / (s.life * 1.7), 0, 0.9) * 0.8; }
     const W0 = L0 * r.float(0.5, 1), T0 = clamp(mass / MAT[mat].density * 1000 / Math.max(1, L0 * W0), 0.3, Math.min(L0, 60));
+    o.x = clamp(o.x, 5, SIZE - 5); o.y = clamp(o.y, 5, SIZE - 5);
     const env = envAt(w, o.x, o.y, o.depth, ctx, 0); const p = preserve(mat, H.endYear - dep, env, r.next(), clamp(1 - T0 / 8, 0, 1));
     if (p.lost && !(MAT[mat].id === 'gold')) { w.ledger.decayed++; return null; }
     const art: Artifact = { id, site: site.id, arch: a.id, mat, produced, deposited: dep, series, maker: undefined, origin: o.origin ?? 'unknown', marks, mass, dims: [L0, W0, T0], x: o.x, y: o.y, depth: o.depth, x0: o.x, y0: o.y, cond: { corr: p.corr, wear, dmg: 0, encrust: p.encrust, frag: p.frag }, assoc: o.assoc, ctx, spot: o.spot ?? 'special', moves: [], lossKind: o.kind, special: o.special, cargo: o.cargo };
@@ -260,14 +262,14 @@ function specials(w: World, I: Idx, site: Site, out: Artifact[], r: Rng, next: (
   if (site.kind === 'accident' && site.special) {
     const ev = H.events.find(q => q.id === site.special.event)!; const victim = H.people.find(p => p.id === ev.people[0])!;
     const base: { assoc: Artifact['assoc']; kind: string; origin: string; special: string } = { assoc: { event: ev.id, persons: [victim.id], settlement: ev.settlement, crossing: ev.extra?.crossing }, kind: 'accident', origin: `lost with ${victim.name}`, special: 'accident' };
-    const pers = [ARC['pocketwatch'], ARC['knife_pocket'], ARC['buckle_belt'], ARC['ring_silver'], ARC['button_brass'], ARC['key_skeleton'], ARC['horseshoe']].filter(a => a.from <= ev.year);
-    for (const a of pers) if (r.chance(0.6)) add(a, 'ford', ev.year, { x: site.x + r.float(-14, 14), y: site.y + r.float(-14, 14), depth: r.float(5, 60), produced: Math.max(a.from, ev.year - r.int(1, 25)), ...base });
+    const pers = [ARC['pocketwatch'], ARC['knife_pocket'], ARC['buckle_belt'], ARC['ring_silver'], ARC['button_brass'], ARC['key_skeleton'], ARC['horseshoe']].filter(a => a.from <= ev.year && (a.to === null || a.to + 40 >= ev.year));
+    for (const a of pers) if (r.chance(0.6)) add(a, 'ford', ev.year, { x: site.x + r.float(-14, 14), y: site.y + r.float(-14, 14), depth: r.float(5, 60), produced: Math.max(a.from, victim.born + 5, ev.year - r.int(1, 25)), ...base });
     for (let i = 0; i < r.int(2, 9); i++) { const s = r.pick(w.coin.series.filter(q => q.year <= ev.year && q.year > ev.year - 30 && q.denom <= 100)); if (s) add(ARC[s.archetype], 'ford', ev.year, { x: site.x + r.float(-12, 12), y: site.y + r.float(-12, 12), depth: r.float(5, 50), series: s, mat: s.metal, ...base }); }
     if (ev.kind === 'lost_shipment') {
       const cargo = ev.extra?.cargo as string; const map: Record<string, [string, number]> = { 'casks of nails': ['nail_cut', 60], 'barrels of flour': ['iron_scrap', 12], 'crates of tools': ['hammer_head', 8], 'bolts of cloth': ['button_brass', 14], 'kegs of powder': ['iron_scrap', 10], crockery: ['transferware', 18], 'bottled goods': ['bottle_bitters', 12] };
       const [aid, cnt] = map[cargo] ?? ['iron_scrap', 8]; let a = ARC[aid]; if (a.from > ev.year || (a.to !== null && a.to + 40 < ev.year)) a = ARC['iron_scrap'];
       for (let i = 0; i < cnt; i++) add(a, 'ford', ev.year, { x: site.x + r.float(-18, 18), y: site.y + r.float(-18, 18), depth: r.float(5, 70), ...base, cargo, origin: `part of a wagon load of ${cargo} lost at the crossing`, produced: Math.max(a.from, ev.year - r.int(0, 3)) });
-      for (const a2 of [ARC['wagon_tire'], ARC['harness_ring'], ARC['horseshoe']]) if (a2.from <= ev.year) for (let i = 0; i < r.int(1, 4); i++) add(a2, 'ford', ev.year, { x: site.x + r.float(-16, 16), y: site.y + r.float(-16, 16), depth: r.float(5, 60), ...base, origin: 'ironwork of the overturned wagon', produced: Math.max(a2.from, ev.year - r.int(0, 15)) });
+      for (const a2 of [ARC['wagon_tire'], ARC['harness_ring'], ARC['horseshoe']]) if (a2.from <= ev.year && (a2.to === null || a2.to + 40 >= ev.year)) for (let i = 0; i < r.int(1, 4); i++) add(a2, 'ford', ev.year, { x: site.x + r.float(-16, 16), y: site.y + r.float(-16, 16), depth: r.float(5, 60), ...base, origin: 'ironwork of the overturned wagon', produced: Math.max(a2.from, ev.year - r.int(0, 15)) });
     }
   }
   // --- gallantry medals, in the town sites where the recipient lived
@@ -287,7 +289,7 @@ function taphonomy(w: World, site: Site, a: Artifact, r: Rng) {
   const H = w.H;
   if (site.kind === 'field' && a.deposited >= 1700) {
     const ang = (hash32(site.id) % 628) / 100; const years = Math.min(60, H.endYear - a.deposited); const d = r.next() * years * 0.4;
-    if (d > 0.5) { const nx = a.x + Math.cos(ang) * d, ny = a.y + Math.sin(ang) * d; a.moves.push({ kind: 'plough', year: a.deposited + Math.round(years / 2), fromX: a.x, fromY: a.y, toX: nx, toY: ny, dist: d }); a.x = nx; a.y = ny; }
+    if (d > 0.5) { const nx = clamp(a.x + Math.cos(ang) * d, 5, SIZE - 5), ny = clamp(a.y + Math.sin(ang) * d, 5, SIZE - 5); a.moves.push({ kind: 'plough', year: a.deposited + Math.round(years / 2), fromX: a.x, fromY: a.y, toX: nx, toY: ny, dist: d }); a.x = nx; a.y = ny; }
     return;
   }
   const mass = Math.max(1, a.mass);

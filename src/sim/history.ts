@@ -188,7 +188,7 @@ export function simulateHistory(seed: string, ctx: Ctx, culture: Culture): Histo
     const L0 = bizList.get(s.id); if (L0) { const i = L0.indexOf(b); if (i >= 0) L0.splice(i, 1); } bizCount.set(s.id + '|' + b.kind, Math.max(0, (bizCount.get(s.id + '|' + b.kind) ?? 1) - 1));
     b.productYears[1] = year;
     if (b.scale >= 3 || b.kind === 'mine_company' || b.kind === 'bank' || b.kind === 'newspaper' || b.kind === 'railway_company') {
-      const ev = addEvent({ kind: why.includes('bankrupt') ? 'bankruptcy' : evKind, year, title: `${b.name} closes`, text: `${b.name} of ${s.name} ceased trading (${why}).`, settlement: s.id, businesses: [b.id], people: [last.person], prereqs, fame: 0.05, x: b.x, y: b.y });
+      const ev = addEvent({ kind: why.includes('bankrupt') ? 'bankruptcy' : evKind, year, title: `${b.name} closes`, text: `${b.name} of ${s.name} ceased trading (${why}).`, settlement: s.id, businesses: [b.id], people: ((P.get(last.person)?.died ?? 9999) >= year ? [last.person] : []), prereqs, fame: 0.05, x: b.x, y: b.y });
       b.closedBy = ev.id; return ev;
     }
     return null;
@@ -449,7 +449,7 @@ export function simulateHistory(seed: string, ctx: Ctx, culture: Culture): Histo
       const mineAlive = H.mines.some(m => m.closed === undefined && (m.settlement === a.id || m.settlement === b.id));
       const p = (mineAlive ? 0.004 : 0.03) * (year > 1960 ? 2 : 1) * (a.pop + b.pop < 3000 ? 1.5 : 0.6);
       if (r.chance(p)) { rt.closed = year; rt.lifted = year + r.int(1, 4);
-        const cl = addEvent({ kind: 'railway_closure', year, title: `The ${rt.name} closes`, text: `Road competition and falling freight ended services on the ${rt.name}. The rails were lifted within a few years.`, route: rt.id, prereqs: rt.eventId ? [rt.eventId] : [], fame: 0.25, settlement: a.id });
+        const cl = addEvent({ kind: 'railway_closure', year, title: `The ${rt.name} closes`, text: `Road competition and falling freight ended services on the ${rt.name}. The rails were lifted within a few years.`, route: rt.id, prereqs: rt.eventId ? [rt.eventId] : [], fame: 0.25, settlement: active(a, year) ? a.id : active(b, year) ? b.id : undefined });
         for (const s of [a, b]) if (s.stationYear && s.kind !== 'port_city') s.pop *= 0.9; void cl; }
     }
     // highways: modern routes bypass old roads
@@ -495,14 +495,16 @@ export function simulateHistory(seed: string, ctx: Ctx, culture: Culture): Histo
         const wc = nearCoast.length ? r.pick(nearCoast) : route.path[Math.min(route.path.length - 1, 3)];
         const [wx, wy] = cellCenter(wc);
         v.lost = year; vesselsActive.splice(vesselsActive.indexOf(v), 1);
-        const lostCrew = Math.min(v.crew.length, r.int(0, v.crew.length)); const dead: string[] = [];
-        for (let i = 0; i < lostCrew; i++) { const p = P.get(v.crew[i])!; p.died = year; p.deathCause = 'drowned in the wreck of the ' + v.name; dead.push(p.id); }
-        const cap = P.get(v.captain!)!; const capDies = r.chance(0.35); if (capDies) { cap.died = year; cap.deathCause = 'drowned in the wreck of the ' + v.name; dead.push(cap.id); }
+        const liveCrew = v.crew.filter(id => { const q = P.get(id)!; return q.died === null || q.died >= year; }); const lostCrew = Math.min(liveCrew.length, r.int(0, liveCrew.length)); const dead: string[] = [];
+        for (let i = 0; i < lostCrew; i++) { const p = P.get(liveCrew[i])!; p.died = year; p.deathCause = 'drowned in the wreck of the ' + v.name; dead.push(p.id); }
+        let cap = P.get(v.captain!)!; if (cap.died !== null && cap.died < year) { cap = newPerson(year, { occupation: 'ship master', residence: home.id, age: r.int(32, 58) }); }
+        const capDies = r.chance(0.35); if (capDies) { cap.died = year; cap.deathCause = 'drowned in the wreck of the ' + v.name; dead.push(cap.id); }
         const stormRec = H.storms.find(s2 => s2.year === year); const wind = stormRec?.windAngle ?? T.traits.windAngle;
-        const ev = addEvent({ kind: 'shipwreck', year, title: `Wreck of the ${v.name}`, text: `The ${v.type} ${v.name} (${v.tonnage} tons, bound from ${home.name} with ${v.cargo}) was driven onto the shore ${(T.coastDist[wc] / 1000).toFixed(1)} km off the coast${lostCrew ? `; ${lostCrew + (capDies ? 1 : 0)} lives were lost` : '; all hands were saved'}.`, settlement: home.id, vessel: v.id, x: wx, y: wy, cell: wc, people: [v.captain!, ...dead.slice(0, 6)], magnitude: lostCrew, prereqs: stormRec?.event ? [stormRec.event] : [], fame: 0.35 + Math.min(0.5, lostCrew * 0.08), extra: { windAngle: wind, cargo: v.cargo } });
+        const evSet = active(home, year) ? home.id : undefined;
+        const ev = addEvent({ kind: 'shipwreck', year, title: `Wreck of the ${v.name}`, text: `The ${v.type} ${v.name} (${v.tonnage} tons, bound from ${home.name} with ${v.cargo}; master ${cap.name}) was driven onto the shore ${(T.coastDist[wc] / 1000).toFixed(1)} km off the coast${lostCrew ? `; ${lostCrew + (capDies ? 1 : 0)} lives were lost` : '; all hands were saved'}.`, settlement: evSet, vessel: v.id, x: wx, y: wy, cell: wc, people: [cap.id, ...dead.filter(d => d !== cap.id).slice(0, 6)], magnitude: lostCrew, prereqs: stormRec?.event ? [stormRec.event] : [], fame: 0.35 + Math.min(0.5, lostCrew * 0.08), extra: { windAngle: wind, cargo: v.cargo } });
         if (lostCrew + (capDies ? 1 : 0) < v.crew.length + 1 && r.chance(0.5)) {
-          const hero = newPerson(year, { occupation: r.pick(['fisherman', 'lighthouse keeper', 'harbour pilot', 'farmer']), residence: home.id, fame: 0.5, role: 'rescuer' });
-          addEvent({ kind: 'rescue', year, title: `${hero.name} rescues survivors of the ${v.name}`, text: `${hero.name} put out through the surf and brought survivors of the ${v.name} ashore. The ${polityAt(year).name} awarded a medal for gallantry.`, settlement: home.id, vessel: v.id, people: [hero.id], prereqs: [ev.id], x: wx, y: wy, fame: 0.5, extra: { medal: true } });
+          const hero = newPerson(year, { occupation: r.pick(['fisherman', 'lighthouse keeper', 'harbour pilot', 'farmer']), residence: evSet ?? home.id, fame: 0.5, role: 'rescuer' });
+          addEvent({ kind: 'rescue', year, title: `${hero.name} rescues survivors of the ${v.name}`, text: `${hero.name} put out through the surf and brought survivors of the ${v.name} ashore. The ${polityAt(year).name} awarded a medal for gallantry.`, settlement: evSet, vessel: v.id, people: [hero.id], prereqs: [ev.id], x: wx, y: wy, fame: 0.5, extra: { medal: true } });
         }
       }
     }
@@ -563,16 +565,17 @@ export function simulateHistory(seed: string, ctx: Ctx, culture: Culture): Histo
       else if (kind === 'train') { const rt = r.pick(H.routes.filter(q => q.kind === 'railway' && (q.opened ?? 9999) <= year && !q.closed)); route = rt; const c = r.pick(rt.path.slice(3, -3).length ? rt.path.slice(3, -3) : rt.path); at = { x: cellCenter(c)[0], y: cellCenter(c)[1], cell: c, sid: rt.from, where: `a train on the ${rt.name}` }; }
       else if (routesOpen.length) { const rt = r.pick(routesOpen); route = rt; const c = r.pick(rt.path.slice(2, -2).length ? rt.path.slice(2, -2) : rt.path); at = { x: cellCenter(c)[0], y: cellCenter(c)[1], cell: c, sid: rt.from, where: `the coach on the ${rt.name}` }; }
       if (at) {
-        const sc = S.get(at.sid)!; const gang = Array.from({ length: r.int(1, 4) }, () => newPerson(year, { occupation: r.pick(['labourer', 'drover', 'discharged soldier', 'gambler']), residence: undefined, age: r.int(20, 45), fame: 0.3 }));
+        const sc = S.get(at.sid)!; if (!active(sc, year)) { const alt = [S.get(route?.to ?? '')].filter(Boolean).find(q => active(q!, year)); if (!alt) continue; at.sid = alt!.id; }
+        const sc2 = S.get(at.sid)!; const gang = Array.from({ length: r.int(1, 4) }, () => newPerson(year, { occupation: r.pick(['labourer', 'drover', 'discharged soldier', 'gambler']), residence: undefined, age: r.int(20, 45), fame: 0.3 }));
         const take = Math.round(r.logNormal(kind === 'bank' ? 4000 : kind === 'train' ? 9000 : 1800, 0.6));
         const bullion = (kind === 'payroll' || kind === 'train') && mines.length && year > 1750 && r.chance(0.5);
-        const ev = addEvent({ kind: 'robbery', year, title: `Robbery of ${at.where}`, text: `${gang.length} armed ${gang.length === 1 ? 'man' : 'men'} robbed ${at.where}, escaping with ${take.toLocaleString()} ${H.currencyMajor}s in cash${bullion ? ' and gold bars' : ''}.`, settlement: sc.id, x: at.x, y: at.y, cell: at.cell, people: gang.map(g => g.id), businesses: victimBiz ? [victimBiz.id] : [], route: route?.id, fame: 0.5, magnitude: take, extra: { bullion, kind } });
+        const ev = addEvent({ kind: 'robbery', year, title: `Robbery of ${at.where}`, text: `${gang.length} armed ${gang.length === 1 ? 'man' : 'men'} robbed ${at.where}, escaping with ${take.toLocaleString()} ${H.currencyMajor}s in cash${bullion ? ' and gold bars' : ''}.`, settlement: sc2.id, x: at.x, y: at.y, cell: at.cell, people: gang.map(g => g.id), businesses: victimBiz ? [victimBiz.id] : [], route: route?.id, fame: 0.5, magnitude: take, extra: { bullion, kind } });
         // outcomes
         const roll = r.next();
         let outcome: 'caught_recovered' | 'caught_cache' | 'killed_cache' | 'escaped_retrieved' | 'escaped_lost';
         outcome = roll < 0.3 ? 'caught_recovered' : roll < 0.5 ? 'caught_cache' : roll < 0.65 ? 'killed_cache' : roll < 0.85 ? 'escaped_retrieved' : 'escaped_lost';
         const trialYear = year + r.int(0, 2);
-        if (outcome.startsWith('caught')) { const tr = addEvent({ kind: 'trial', year: trialYear, title: `Trial of the ${at.where.replace(/^the /, '')} robbers`, text: `${gang[0].name} was convicted${outcome === 'caught_cache' ? ' but refused to say where the money was hidden; it was never recovered' : ', and the money was recovered'}.`, settlement: sc.id, people: gang.map(g => g.id), prereqs: [ev.id], fame: 0.35 }); void tr; gang[0].deathCause = undefined; gang[0].notes.push('convicted of robbery'); }
+        if (outcome.startsWith('caught')) { const tr = addEvent({ kind: 'trial', year: trialYear, title: `Trial of the ${at.where.replace(/^the /, '')} robbers`, text: `${gang[0].name} was convicted${outcome === 'caught_cache' ? ' but refused to say where the money was hidden; it was never recovered' : ', and the money was recovered'}.`, settlement: sc2.id, people: gang.map(g => g.id), prereqs: [ev.id], fame: 0.35 }); void tr; gang[0].deathCause = undefined; gang[0].notes.push('convicted of robbery'); }
         if (outcome === 'killed_cache') { gang[0].died = year + r.int(0, 1); gang[0].deathCause = 'shot by a posse'; }
         if (outcome === 'caught_cache' || outcome === 'killed_cache' || outcome === 'escaped_lost') {
           // find a remote hideout: 3-12 km from the crime, away from settlements, in cover
@@ -595,8 +598,8 @@ export function simulateHistory(seed: string, ctx: Ctx, culture: Culture): Histo
     // savings hoards: farmers distrusting banks in bad years, burying valuables before war or flood
     if (r.chance(ec < 0.7 ? 0.1 : 0.03) && year >= 1700) {
       const farms = H.settlements.filter(f => f.kind === 'farmstead' && active(f, year)); if (farms.length) {
-        const f = r.pick(farms); const owner = P.get(f.founderId ?? '') ?? newPerson(year, { occupation: 'farmer', residence: f.id }); const sum = Math.round(r.logNormal(120, 0.6));
-        const retrieved = r.chance(0.8) && (owner.died === null || owner.died > year + 5);
+        const f = r.pick(farms); let owner = P.get(f.founderId ?? '') as Person; if (!owner || (owner.died !== null && owner.died < year) || owner.born > year - 18) { owner = newPerson(year, { occupation: 'farmer', residence: f.id }); owner.surname = (f as any).family; owner.name = `${owner.given} ${owner.surname}`; } const sum = Math.round(r.logNormal(120, 0.6));
+        const retrieved = r.chance(0.8) && (owner.died === null || owner.died >= year + 9);
         const why = ec < 0.7 ? 'during the bank failures' : war ? `for fear of raiders in the ${war.name}` : 'to keep it from thieves';
         const cx = f.x + r.float(-60, 60), cy = f.y + r.float(-60, 60);
         const ev = addEvent({ kind: 'cache_hidden', year, title: `${owner.name} buries savings`, text: `${owner.name} of ${f.name} buried a crock of coin ${why}.`, settlement: f.id, people: [owner.id], x: cx, y: cy, fame: 0.1, extra: { secret: true } });
@@ -609,7 +612,7 @@ export function simulateHistory(seed: string, ctx: Ctx, culture: Culture): Histo
       if (x.built > year) continue; const rt = H.routes.find(q => q.id === x.route)!; if (rt.closed && rt.closed < year) continue;
       const p = (x.kind === 'ford' || x.kind === 'ferry' ? 0.004 : 0.0008) * (floodEv ? 5 : 1) * Math.min(2, 0.5 + x.stream);
       if (!r.chance(p)) continue;
-      const a = S.get(rt.from)!; const v = newPerson(year, { occupation: r.pick(['farmer', 'drover', 'teamster', 'travelling salesman', 'miner']), residence: a.id, age: r.int(20, 60) });
+      const a0 = S.get(rt.from)!, a1 = S.get(rt.to)!; const a = active(a0, year) ? a0 : active(a1, year) ? a1 : null; if (!a) continue; const v = newPerson(year, { occupation: r.pick(['farmer', 'drover', 'teamster', 'travelling salesman', 'miner']), residence: a.id, age: r.int(20, 60) });
       v.died = year; v.deathCause = `drowned crossing the ${x.kind}`; v.fame = 0.1;
       const lostShip = r.chance(0.5);
       const ev = addEvent({ kind: lostShip ? 'lost_shipment' : 'accident_death', year, title: lostShip ? `Wagon lost at the ${a.name} ${x.kind}` : `${v.name} drowned at the ${x.kind}`, text: lostShip ? `${v.name}'s wagon overturned in the ${floodEv ? 'flooded ' : ''}stream at the ${x.kind}; the driver drowned and the load was lost.` : `${v.name} was swept away while crossing the ${x.kind}${floodEv ? ' in flood' : ''}.`, settlement: a.id, people: [v.id], x: x.x, y: x.y, cell: x.cell, prereqs: floodEv ? [floodEv.id] : [], fame: 0.15, extra: { crossing: x.id, cargo: lostShip ? r.pick(['casks of nails', 'barrels of flour', 'crates of tools', 'bolts of cloth', 'kegs of powder', 'crockery', 'bottled goods']) : undefined } });

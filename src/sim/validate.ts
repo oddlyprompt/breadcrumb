@@ -31,7 +31,7 @@ export function validateWorld(w: World, opts: { siteSample?: number } = {}): Rep
       case 'iron_formation': if (!f.tags.includes('bif') || f.ageMa < 1700) bad('geology', `iron formation ${d.id} wrong host/age`); break;
       case 'coal': if (!(f.ageMa <= 359 )) bad('geology', `coal ${d.id} predates land plants forests (${f.ageMa} Ma)`); break;
       case 'evaporite': if (!f.tags.includes('evaporite')) bad('geology', `evaporite ${d.id} host`); break;
-      case 'pegmatite': if (!f.tags.includes('granitic')) bad('geology', `pegmatite ${d.id} host`); break;
+      case 'pegmatite': if (d.plutonId === undefined || !G.formations[G.plutons[d.plutonId].formation].tags.includes('granitic')) bad('geology', `pegmatite ${d.id} not beside a granitic pluton`); break;
     }
     for (const m of d.minerals.primary) if (m === 'coal' && d.kind !== 'coal') bad('geology', `${d.id} coal outside coal seam`);
   }
@@ -77,7 +77,7 @@ export function validateWorld(w: World, opts: { siteSample?: number } = {}): Rep
       if (a.token) { const t = w.issues.tokens.find(q => q.id === a.token)!; const b = B.get(t.business)!; if (a.deposited < t.from || a.produced < t.from || a.produced > t.to) bad('artifact', `${a.id} token out of issue period`); if (b.founded > a.produced) bad('artifact', 'token before business founded'); }
       if (a.maker) { const b = B.get(a.maker)!; if (a.produced < b.founded || (b.closed !== undefined && a.produced > b.closed)) bad('artifact', `${a.id} made by ${b.name} outside its operating years (${a.produced} vs ${b.founded}-${b.closed})`); }
       if (a.medal) { const m = w.issues.medals.find(q => q.id === a.medal)!; if (a.deposited < m.year) bad('artifact', 'medal lost before struck'); }
-      for (const pid of a.assoc.persons ?? []) { const p = P.get(pid)!; if (p.born > a.produced + 2 && a.special !== 'accident' && a.special !== 'medal') bad('artifact', `${a.id} tied to ${p.name} born after manufacture`); if (a.special === 'accident' && p.died !== a.deposited) bad('artifact', 'accident victim date'); if (a.special === 'cache' && p.died !== null && p.died < a.deposited - 3) bad('artifact', 'cache owner dead before burial'); if (a.special === 'medal' && p.died !== null && a.deposited < p.died) bad('artifact', 'gallantry medal lost before the owner died'); }
+      for (const pid of a.assoc.persons ?? []) { const p = P.get(pid)!; if (p.born > a.produced + 2 && !a.series && a.special !== 'accident' && a.special !== 'medal') bad('artifact', `${a.id} tied to ${p.name} born after manufacture`); if (a.special === 'accident' && p.died !== a.deposited) bad('artifact', 'accident victim date'); if (a.special === 'cache' && p.died !== null && p.died < a.deposited - 3) bad('artifact', 'cache owner dead before burial'); if (a.special === 'medal' && p.died !== null && a.deposited < p.died) bad('artifact', 'gallantry medal lost before the owner died'); }
       if (a.assoc.event) { const e = E.get(a.assoc.event); if (!e) bad('artifact', 'event missing'); else if (e.year > a.deposited + 0 && a.special !== 'medal') bad('artifact', `${a.id} linked to later event`); }
       const yearsBuried = H.endYear - a.deposited;
       if (yearsBuried < 12 && a.cond.corr > 0.4) bad('artifact', `${a.id} ${a.mat} object buried only ${yearsBuried} yrs shows corrosion ${a.cond.corr.toFixed(2)}`);

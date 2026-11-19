@@ -16,7 +16,7 @@ export function preserve(matId: string, yearsBuried: number, env: BuryEnv, u: nu
   if (m.organic && waterlogged) k *= 0.08;              // anaerobic mud preserves organics
   if (m.organic && env.temp < 3) k *= 0.5;
   k *= 1 + env.disturbed * 0.35;                         // ploughing and digging admit air and break objects
-  const exposure = (yearsBuried / 100) * k * (0.6 + thin * 0.8);  // thin things corrode through sooner
+  const exposure = (yearsBuried / 100) * k * (0.6 + thin * 0.8) * (m.organic ? 1 : 0.4);  // thin things corrode through sooner
   let corr = 1 - Math.exp(-exposure * 1.15);
   corr = clamp(corr * (0.85 + 0.3 * u), 0, 1);
   const lost = corr > (m.organic ? 0.92 : 0.985) ;

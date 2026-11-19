@@ -32,8 +32,8 @@ export function generateWorld(seed: string): World {
   const nm = new Namer(culture, stream(seed, 'worldname'));
   const range = geo.features.find(f => f.kind === 'range');
   w.name = range ? `The ${range.name.replace(/s$/, '')} Country` : `The ${nm.stem(2)} Coast`;
-  w.start = chooseStart(w);
   w.docs = generateDocuments(w);
+  w.start = chooseStart(w);
   return w;
 }
 
@@ -44,6 +44,7 @@ export function chooseStart(w: World): World['start'] {
   for (const s of H.settlements) {
     if (!s.current || s.kind === 'farmstead' || s.kind === 'seasonal_camp' || s.kind === 'military_settlement') continue;
     if (s.pop < 250 || s.pop > 9000 || !s.hasArchive) continue;
+    if (w.docs.filter(d => d.holdings.includes(s.id)).length < 4) continue;
     let beach = 0, publicSites = 0, ghosts = 0, specimens = 0, fields = 0;
     for (const st of sites) {
       const d = Math.hypot(st.x - s.x, st.y - s.y); if (d > 7000 || st.access === 'builtup') continue;
