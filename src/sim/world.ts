@@ -52,6 +52,8 @@ export function chooseStart(w: World): World['start'] {
     if (!s.current || s.kind === 'farmstead' || s.kind === 'seasonal_camp' || s.kind === 'military_settlement') continue;
     if (s.pop < 250 || s.pop > 9000 || !s.hasArchive) continue;
     if (w.docs.filter(d => d.holdings.includes(s.id)).length < 4) continue;
+    const kg = sites.filter(q => (q.kind === 'beach' || q.kind === 'fairground' || q.kind === 'picnic' || q.kind === 'town_common') && q.access === 'public' && q.densityMult > 0 && Math.hypot(q.x - s.x, q.y - s.y) < 2500);
+    if (!kg.length) continue;
     let beach = 0, publicSites = 0, ghosts = 0, specimens = 0, fields = 0;
     for (const st of sites) {
       const d = Math.hypot(st.x - s.x, st.y - s.y); if (d > 7000 || st.access === 'builtup') continue;
@@ -61,7 +63,7 @@ export function chooseStart(w: World): World['start'] {
     }
     for (const d of D.deposits) { const dd = Math.hypot(d.x - s.x, d.y - s.y); if (dd < 7000 && (d.kind === 'fossil_bed' || d.kind === 'geode_field' || d.kind === 'quartz_veins' || d.kind === 'pegmatite')) specimens++; }
     const riverNear = w.geo.rivers.some(r => r.path.some(c => Math.hypot(((c % N) + 0.5) * CELL - s.x, (((c / N) | 0) + 0.5) * CELL - s.y) < 3500));
-    const score = Math.min(3, beach) * 3 + Math.min(5, publicSites) * 1.5 + Math.min(6, ghosts) * 1.2 + Math.min(4, specimens) * 1.5 + Math.min(2, fields) + (riverNear ? 2 : 0) - Math.abs(Math.log(s.pop / 1200)) * 1.2;
+    const score = (kg.some(q => q.kind === 'beach') ? 4 : 0) + Math.min(3, kg.length) * 2 + Math.min(3, beach) * 2 + Math.min(5, publicSites) * 1.5 + Math.min(6, ghosts) * 1.2 + Math.min(4, specimens) * 1.5 + Math.min(2, fields) + (riverNear ? 2 : 0) - Math.abs(Math.log(s.pop / 1200)) * 1.2;
     if (!best || score > best.score) best = { s, score, why: `${beach ? 'shoreline, ' : ''}${ghosts ? 'old sites nearby, ' : ''}${specimens ? 'rock exposures, ' : ''}${riverNear ? 'a river' : ''}`.replace(/, $/, '') };
   }
   if (!best) { const s = H.settlements.filter(q => q.current && q.kind !== 'farmstead').sort((a, b) => b.pop - a.pop)[0] ?? H.settlements[0]; return { settlement: s.id, x: s.x, y: s.y, reason: 'the largest living town' }; }

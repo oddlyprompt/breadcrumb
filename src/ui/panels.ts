@@ -18,14 +18,14 @@ import { wowOf } from './app';
 const kbOf = (a: App) => new Set(a.g.kb);
 function thumb(a: App, f: Find, size = 64) { const cv = h('canvas', { width: size, height: size }) as HTMLCanvasElement; drawFind(cv, a.w, f, a.tools, { size }); return cv; }
 function title(a: App, f: Find) { return f.art ? describeArtifact(a.w, f, kbOf(a), a.tools).title : specimenName(a.w, f, kbOf(a), a.tools).name; }
-const inTown = (a: App) => { const n = nearestSettlementOf(a.w, a.g.x, a.g.y); return n.d < Math.max(450, n.s.radius * 1.3 + 150) ? n.s : null; };
+const inTown = (a: App) => { const n = nearestSettlementOf(a.w, a.g.x, a.g.y); const core = Math.min(450, Math.max(150, 60 + Math.sqrt(Math.max(10, n.s.peak)) * 7 * 0.6)); return n.d < core ? n.s : null; };
 function bind(el: HTMLElement, fn: (act: string, t: HTMLElement) => void) { el.addEventListener('click', e => { const t = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null; if (t) { e.preventDefault(); fn(t.dataset.act!, t); } }); }
 
 // ================= PACK
 export function packPane(a: App, el: HTMLElement) {
   const g = a.g; const finds = g.finds.filter(f => f.status !== 'sold').slice().reverse(); const used = slotsUsed(g), cap = slotsOf(g);
   el.append(h('h2', {}, 'Pack'), h('div', { class: 'row small', style: 'justify-content:space-between' }, h('span', {}, `${used} of ${cap} slots`), h('span', { class: 'muted' }, 'Junk of the same kind stacks automatically')), h('div', { class: 'bar' }, h('i', { style: `width:${Math.min(100, used / cap * 100)}%` })));
-  if (!finds.length) { el.append(h('div', { class: 'card' }, h('p', {}, 'Your pack is empty.'), h('p', { class: 'small muted' }, 'Free ways to start: switch to Surface mode (F) and look for glints on the ground along the beach or old tracks; walk the shoreline after a falling tide; pick up rocks that look interesting; or read the archive for places worth visiting. A metal detector (Town tab) opens up buried finds.'))); return; }
+  if (!finds.length) { el.append(h('div', { class: 'card' }, h('p', {}, 'Your pack is empty.'), h('p', { class: 'small muted' }, 'Start at the places marked with green triangles on the map (M): the shore, the common, the fairground. People lose things there, and sand, worn turf and the tideline show what lies on top. Switch to Surface mode and look for glints. A metal detector (Town tab) finds what lies just below. Old sites further afield have to be found through research.'))); return; }
   const sel = finds.find(f => f.uid === a.selected) ?? null;
   if (sel) packDetail(a, el, sel);
   const list = h('div', { class: 'list' }); for (const f of finds.slice(0, 80)) { const t = f.art ? describeArtifact(a.w, f, kbOf(a), a.tools) : null; const sp = f.spec ? specimenName(a.w, f, kbOf(a), a.tools) : null; const row = h('div', { class: 'card find' + (sel?.uid === f.uid ? ' sel' : ''), 'data-act': 'sel', 'data-uid': f.uid }, thumb(a, f), h('div', {}, h('div', { class: 't' }, (t?.title ?? sp!.name) + (f.count > 1 ? ` ×${f.count}` : '')), h('div', { class: 'm' }, f.art ? `${t!.sub}${t!.level >= 3 && t!.rarity ? ' · ' + t!.rarity : ''}` : `${f.spec!.kind}, ${f.spec!.mass < 10 ? f.spec!.mass.toFixed(1) : Math.round(f.spec!.mass)} g`), h('div', {}, f.status === 'keep' ? h('span', { class: 'tag t2' }, '★ kept') : null, t && t.level >= 4 ? h('span', { class: 'tag t1' }, 'attributed') : null))); list.append(row); }
@@ -78,7 +78,7 @@ export function gearPane(a: App, el: HTMLElement) {
 // ================= TOWN
 export function shopPane(a: App, el: HTMLElement) {
   const g = a.g, w = a.w; const town = inTown(a); el.append(h('h2', {}, 'Town'));
-  if (!town) { const n = nearestSettlementOf(w, g.x, g.y); el.append(h('div', { class: 'card' }, h('p', {}, `You are in the open country, ${(n.d / 1000).toFixed(1)} km from ${n.s.name}.`), h('p', { class: 'small muted' }, 'Shops, dealers and the archive are in towns. Open the map (M), click a settlement and travel there.'))); return; }
+  if (!town) { const n = nearestSettlementOf(w, g.x, g.y); el.append(h('div', { class: 'card' }, h('p', {}, n.d < 1500 ? `You are on the edge of ${n.s.name}, ${Math.round(n.d)} m from the high street where the shops are.` : `You are in the open country, ${(n.d / 1000).toFixed(1)} km from ${n.s.name}.`), h('p', { class: 'small muted' }, 'Shops, dealers and the archive are in towns. Open the map (M), click a settlement and travel there.'))); return; }
   el.append(h('p', { class: 'small' }, `You are in ${town.name}, a ${town.kind.replace(/_/g, ' ')} of about ${Math.round(town.pop)} people.`));
   const buyers = buyersFor(w, town.id); const bi = Math.min(a.shopBuyer, buyers.length - 1); const tabs = h('div', { class: 'tabs', style: 'margin:6px 0' }); const names = ['Dealers', 'Equipment'];
   const mode = (el as any).__mode ?? 'sell'; const mk = (id: string, label: string) => tabs.append(h('button', { class: mode === id ? 'on' : '', onClick: () => { (a as any).shopMode = id; a.renderPane(); } }, label)); void names;

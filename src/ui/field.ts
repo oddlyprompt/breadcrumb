@@ -27,6 +27,7 @@ export class FieldView {
     this.cv = document.createElement('canvas'); host.appendChild(this.cv); this.c = this.cv.getContext('2d')!; this.x = g.x; this.y = g.y; this.coil.x = this.x; this.coil.y = this.y;
     for (const f of g.featuresSeen) this.seenFeat.add(f);
     const ro = new ResizeObserver(() => this.resize()); ro.observe(host); this.resize();
+    if (this.vw < 700) this.ppm = Math.max(9, Math.min(24, this.vw / 34)); // phones: show about 35 m across
     window.addEventListener('keydown', this.kd); window.addEventListener('keyup', this.ku);
     this.cv.addEventListener('pointermove', e => { const r = this.cv.getBoundingClientRect(); this.mouse.x = e.clientX - r.left; this.mouse.y = e.clientY - r.top; this.mouse.in = true; });
     this.cv.addEventListener('pointerleave', () => { this.mouse.in = false; });
@@ -133,7 +134,7 @@ export class FieldView {
     const g = this.g, w = this.w; if (Math.floor(performance.now() / 200) === this.lastScan) return; this.lastScan = Math.floor(performance.now() / 200);
     for (const s of this.S.sitesNear(this.x, this.y, 120)) {
       const d = Math.hypot(s.x - this.x, s.y - this.y);
-      if (d < s.r * 0.7 + 4 && s.access !== 'builtup' && !g.sitesVisited.includes(s.id) && s.kind !== 'cache' && s.kind !== 'accident') { g.sitesVisited.push(s.id); this.cb.siteEntered(s, true); }
+      if (d < s.r * 0.7 + 4 && s.access !== 'builtup' && this.S.access(this.x, this.y).ok && !g.sitesVisited.includes(s.id) && s.kind !== 'cache' && s.kind !== 'accident') { g.sitesVisited.push(s.id); this.cb.siteEntered(s, true); }
       for (const f of s.features) { if (this.seenFeat.has(f.id)) continue; const sight = 10 + f.conspicuous * 65; if (Math.hypot(f.x - this.x, f.y - this.y) < sight) { this.seenFeat.add(f.id); g.featuresSeen.push(f.id); this.cb.feature(f); } }
     }
   }
@@ -276,12 +277,40 @@ export class FieldView {
     }
   }
   private hoverNear(f: Feature) { return Math.hypot(f.x - this.x, f.y - this.y) < 14; }
+  /** A living town: a street grid with houses along it, densest near the centre. Purely visual; the land is private. */
+  private drawStreets(c: CanvasRenderingContext2D, X: any, Y: any, s: Site, st: { x: number; y: number; streetAngle: number }, x0: number, y0: number, x1: number, y1: number) {
+    const ppm = this.ppm, ca = Math.cos(st.streetAngle), sa = Math.sin(st.streetAngle), R = s.r * 0.85, BLOCK = 60, STEP = 15;
+    const toTown = (x: number, y: number) => { const dx = x - st.x, dy = y - st.y; return [dx * ca + dy * sa, -dx * sa + dy * ca]; };
+    const toWorld = (u: number, v: number) => [st.x + u * ca - v * sa, st.y + u * sa + v * ca];
+    const corners = [toTown(x0, y0), toTown(x1, y0), toTown(x0, y1), toTown(x1, y1)];
+    const u0 = Math.max(-R, Math.min(...corners.map(q => q[0])) - 20), u1 = Math.min(R, Math.max(...corners.map(q => q[0])) + 20), v0 = Math.max(-R, Math.min(...corners.map(q => q[1])) - 20), v1 = Math.min(R, Math.max(...corners.map(q => q[1])) + 20);
+    if (u0 > u1 || v0 > v1) return;
+    const open = (x: number, y: number) => isWater(this.w, x, y, this.tideNow) || this.S.access(x, y).ok;
+    c.lineCap = 'butt'; c.strokeStyle = '#8f8a80'; c.lineWidth = Math.max(2, 7 * ppm);
+    for (let k = Math.ceil(v0 / BLOCK); k * BLOCK <= v1; k++) { const v = k * BLOCK; const ext = Math.sqrt(Math.max(0, R * R - v * v)); const a = toWorld(Math.max(u0, -ext), v), b = toWorld(Math.min(u1, ext), v); if (Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]) < 1) continue; c.beginPath(); c.moveTo(X(a[0]), Y(a[1])); c.lineTo(X(b[0]), Y(b[1])); c.stroke(); }
+    for (let k = Math.ceil(u0 / BLOCK); k * BLOCK <= u1; k++) { const u = k * BLOCK; const ext = Math.sqrt(Math.max(0, R * R - u * u)); const a = toWorld(u, Math.max(v0, -ext)), b = toWorld(u, Math.min(v1, ext)); if (Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]) < 1) continue; c.beginPath(); c.moveTo(X(a[0]), Y(a[1])); c.lineTo(X(b[0]), Y(b[1])); c.stroke(); }
+    // houses on both sides of each street running along u
+    for (let k = Math.ceil(v0 / BLOCK) - 1; k * BLOCK <= v1 + BLOCK; k++) for (const side of [-1, 1]) {
+      const v = k * BLOCK + side * 13;
+      for (let j = Math.floor(u0 / STEP); j * STEP <= u1; j++) {
+        const u = j * STEP + 4; const rr = Math.hypot(u, v); if (rr > R) continue; const h = hash01(hash32(s.id), k * 1000 + j, side + 5);
+        if (h > 0.92 - 0.5 * (rr / R)) continue; // fewer houses towards the edge of town
+        if (Math.abs(((u % BLOCK) + BLOCK) % BLOCK) < 9) continue; // leave the cross streets clear
+        const [hx, hy] = toWorld(u, v); if (open(hx, hy)) continue;
+        const bw = (8 + h * 5) * ppm, bh = (7 + ((h * 7) % 1) * 4) * ppm; c.save(); c.translate(X(hx), Y(hy)); c.rotate(st.streetAngle);
+        c.fillStyle = 'rgba(80,100,60,.35)'; c.fillRect(-bw * 0.7, -bh * 0.75 + side * bh * 0.2, bw * 1.4, bh * 1.5);
+        c.fillStyle = '#00000044'; c.fillRect(-bw / 2 + 3, -bh / 2 + 3, bw, bh); c.fillStyle = ['#a65a40', '#b49b78', '#8d8f93', '#9a6a4a', '#7d6a58'][Math.floor(h * 5) % 5]; c.fillRect(-bw / 2, -bh / 2, bw, bh);
+        c.fillStyle = '#00000030'; c.fillRect(-bw / 2, -bh / 2, bw, bh / 2); c.restore();
+      }
+    }
+  }
   private drawTown(c: CanvasRenderingContext2D, X: any, Y: any, x0: number, y0: number, x1: number, y1: number) {
     const ppm = this.ppm;
     for (const s of this.S.sitesNear((x0 + x1) / 2, (y0 + y1) / 2, Math.max(x1 - x0, y1 - y0) / 2 + 80)) {
       if (s.access !== 'builtup') continue; const st = s.refs.settlement ? this.w.H.settlements.find(q => q.id === s.refs.settlement) : undefined; if (!st) continue;
+      if (s.kind === 'town_core') this.drawStreets(c, X, Y, s, st, x0, y0, x1, y1);
       for (const sp of s.spots) { if (sp.kind === 'privy and midden' || sp.kind === 'main street' || sp.kind === 'cross street' || sp.kind === 'quay' || sp.kind === 'common') continue; const px = X(sp.x), py = Y(sp.y); if (px < -40 || px > this.vw + 40 || py < -40 || py > this.vh + 40) continue; const h2 = hash32(sp.x + ',' + sp.y); const bw = (7 + (h2 % 5)) * ppm, bh = (6 + (h2 % 4)) * ppm; c.save(); c.translate(px, py); c.rotate(st.streetAngle + ((h2 % 5) - 2) * 0.03); c.fillStyle = 'rgba(70,90,50,.35)'; c.fillRect(-bw * 0.9, -bh * 0.9, bw * 1.8, bh * 1.8); c.fillStyle = '#00000044'; c.fillRect(-bw / 2 + 3, -bh / 2 + 3, bw, bh); c.fillStyle = ['#a65a40', '#b49b78', '#8d8f93', '#9a6a4a'][h2 % 4]; c.fillRect(-bw / 2, -bh / 2, bw, bh); c.fillStyle = '#00000033'; c.beginPath(); c.moveTo(-bw / 2, -bh / 2); c.lineTo(0, -bh / 2 - bh * 0.25); c.lineTo(bw / 2, -bh / 2); c.fill(); c.restore(); }
-      if (this.mode !== 'detect' || Math.hypot(s.x - this.x, s.y - this.y) < s.r + 30) { const px = X(s.x), py = Y(s.y); c.strokeStyle = 'rgba(180,60,40,.6)'; c.setLineDash([8, 6]); c.lineWidth = 2; c.beginPath(); c.arc(px, py, s.r * ppm, 0, 7); c.stroke(); c.setLineDash([]); }
+      { const px = X(s.x), py = Y(s.y); c.strokeStyle = 'rgba(180,60,40,.6)'; c.setLineDash([8, 6]); c.lineWidth = 2; c.beginPath(); c.arc(px, py, s.r * ppm, 0, 7); c.stroke(); c.setLineDash([]); }
     }
   }
 }

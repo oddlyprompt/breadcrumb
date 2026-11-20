@@ -14,7 +14,8 @@ import { aStar } from './path';
 import { clamp } from './noise';
 import type { World } from './worldtypes';
 import type { Doc } from './documents';
-import { fmtDate, MONTHS, placeDescribe } from './describe';
+import { fmtDate, MONTHS, placeDescribe, bearing as bearingWord } from './describe';
+import { KNOWN_GROUND } from './sites';
 
 export function lakeMask(w: World, x: number, y: number): number { const fx = clamp(x / CELL - 0.5, 0, N - 1.001), fy = clamp(y / CELL - 0.5, 0, N - 1.001); const ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy; const m = (i: number) => (w.T.lake[i] >= 0 ? 1 : 0); return (m(iy * N + ix) * (1 - tx) + m(iy * N + ix + 1) * tx) * (1 - ty) + (m((iy + 1) * N + ix) * (1 - tx) + m((iy + 1) * N + ix + 1) * tx) * ty; }
 /** is this spot under the sea (at the given tide) or a lake? */
@@ -22,6 +23,9 @@ export function isWater(w: World, x: number, y: number, tide = 0): boolean { if 
 
 export const SAVE_VERSION = 1;
 const BUCKET = 8; const bucketKey = (x: number, y: number) => Math.floor(y / BUCKET) * 100000 + Math.floor(x / BUCKET);
+/** Share of shallow objects that actually lie exposed on the surface, by kind of ground. Bare sand, ploughland,
+ *  dump faces and spoil heaps show things; turf shows a little; forest floor and verges almost nothing. */
+const SURFACE: Record<string, number> = { beach: 1, wreck_debris: 1, town_dump: 0.55, diggings: 0.35, mine: 0.3, fairground: 0.16, picnic: 0.16, town_common: 0.14, schoolyard: 0.16, campground: 0.2, trailhead: 0.2, station: 0.12, works: 0.1, field: 0.4, town_core: 0.06, farm: 0.06, ford: 0.12, accident: 0.1, road: 0.05, railway: 0.08, battlefield: 0.05, cache: 0 };
 const PUBLIC_IN_TOWN = new Set(['town_common', 'schoolyard', 'picnic', 'fairground', 'beach', 'town_dump']);
 export interface Bookmark { id: string; day: number; label: string; x: number; y: number; radius: number; doc?: string; note?: string }
 export interface JournalNote { id: string; day: number; kind: 'find' | 'place' | 'record' | 'link' | 'geology' | 'note' | 'objective'; title: string; text: string; x?: number; y?: number; ref?: string }
@@ -43,11 +47,14 @@ export function newGame(w: World): GameState {
     stats: { dug: 0, found: 0, sold: 0, earned: 0, minutes: 0, panned: 0, travelled: 0 }, objectives: {}, soldIds: [], knownTypes: [], knownMakers: [],
   };
   const s = w.H.settlements.find(q => q.id === w.start.settlement)!;
-  { const open = w.sites.sites.filter(q => q.access === 'public' && ['town_common', 'schoolyard', 'beach', 'picnic', 'fairground', 'town_dump'].includes(q.kind) && Math.hypot(q.x - s.x, q.y - s.y) < 2500).sort((a, b) => Math.hypot(a.x - s.x, a.y - s.y) - Math.hypot(b.x - s.x, b.y - s.y))[0]; if (open) { gm.x = open.x + 8; gm.y = open.y + 8; } }
+  // start on the high street of the starting town; the known grounds around it are common knowledge
+  gm.x = s.x + 6; gm.y = s.y + 6;
+  const known = w.sites.sites.filter(q => KNOWN_GROUND.has(q.kind) && q.access === 'public' && q.densityMult > 0 && Math.hypot(q.x - s.x, q.y - s.y) < 6000).sort((a, b) => Math.hypot(a.x - s.x, a.y - s.y) - Math.hypot(b.x - s.x, b.y - s.y));
+  for (const q of known) gm.kb.push(`site:${q.id}:known`);
   gm.kb.push(`settlement:${s.id}`);
   // public records: the current settlements and the regional geology are common knowledge
   for (const q of w.H.settlements) if (q.current && q.kind !== 'farmstead') gm.kb.push(`settlement:${q.id}`);
-  gm.notes.push({ id: 'n0', day: 0, kind: 'note', title: `Arrival at ${s.name}`, text: `You have $${START_CASH}, a backpack and a free afternoon. ${w.name} lies around you: the archive, the shoreline and the old workings are all open to anyone with patience.`, x: s.x, y: s.y });
+  gm.notes.push({ id: 'n0', day: 0, kind: 'note', title: `Arrival at ${s.name}`, text: `You have $${START_CASH}, a backpack and a free afternoon. Folk in ${s.name} hunt for lost things at ${known.slice(0, 4).map(q => `${q.name} (${(Math.hypot(q.x - s.x, q.y - s.y) / 1000).toFixed(1)} km ${bearingWord(q.x - s.x, q.y - s.y)})`).join(', ') || 'the edge of town'}. These are marked on your map. Anything further afield you will have to find out about.`, x: s.x, y: s.y });
   return gm;
 }
 export const hasFact = (g: GameState) => { const set = new Set(g.kb); return (f: string) => set.has(f); };
@@ -112,7 +119,7 @@ export class Searcher {
   access(x: number, y: number): { ok: boolean; reason: string; farm?: string; site?: Site } {
     if (isWater(this.w, x, y, this.tide)) return { ok: false, reason: 'Under water.' };
     const near5 = this.sitesNear(x, y, 5);
-    if (near5.some(s => PUBLIC_IN_TOWN.has(s.kind) && s.access === 'public' && Math.hypot(s.x - x, s.y - y) <= s.r + (s.dynamic === 'beach' ? 450 : 0))) return { ok: true, reason: '' };
+    if (near5.some(s => PUBLIC_IN_TOWN.has(s.kind) && s.access === 'public' && (s.kind === 'beach' ? Math.hypot(s.x - x, s.y - y) <= s.r + 450 && elevAt(this.w.T, x, y) < this.tide + 2.5 : Math.hypot(s.x - x, s.y - y) <= s.r))) return { ok: true, reason: '' };
     for (const s of near5) {
       if (s.access === 'builtup' && Math.hypot(s.x - x, s.y - y) <= s.r) return { ok: false, reason: s.kind === 'farm' ? 'A working farmyard: private.' : 'Built-up land and private property: nothing here is open for searching.', site: s };
       if (s.access === 'permission' && Math.hypot(s.x - x, s.y - y) <= s.r && this.g.permissions[s.owner!] !== 'granted') return { ok: false, reason: this.g.permissions[s.owner!] === 'denied' ? 'The farmer has refused permission.' : 'Farmland: you need the farmer\'s permission.', farm: s.owner, site: s };
@@ -144,8 +151,8 @@ export class Searcher {
   visibleItems(x: number, y: number, r: number, budget = 2): Array<{ kind: 'artifact' | 'specimen'; art?: Artifact; spec?: Specimen; x: number; y: number; hex: string; size: number }> {
     const out: any[] = []; const ground = this.groundAt(x, y); const cover = ground.veg === Veg.Conifer || ground.veg === Veg.Mixed || ground.veg === Veg.Broadleaf ? 0.6 : ground.veg === Veg.Grass || ground.veg === Veg.Heath || ground.veg === Veg.Shrub ? 0.45 : ground.veg === Veg.Wetland ? 0.5 : 0.1;
     const light = lightLevel(this.g.day, this.g.minute); const wx = weatherOn(this.w, this.g.day);
-    for (const q of this.artifactsNear(x, y, r, budget)) { if (q.depth > 1.8) continue; const sz = Math.sqrt(q.art.dims[0] * q.art.dims[1]); const vis = clamp(1 - cover * (1 - Math.min(1, sz / 90)) * 0.9, 0.05, 1) * (0.35 + 0.65 * light); if (hash01(hash32(q.art.id), 77) < vis && Math.hypot(q.x - x, q.y - y) <= r) out.push({ kind: 'artifact', art: q.art, x: q.x, y: q.y, hex: ARC_HEX(q.art), size: Math.max(2, sz) }); }
-    for (const s of this.specimensNear(x, y, r)) { if (s.depth > 1 || s.kind === 'hotrock' || s.panOnly) continue; const vis = clamp(1 - cover * (1 - Math.min(1, s.size / 12)), 0.1, 1) * (0.35 + 0.65 * light); if (hash01(hash32(s.id), 78) < vis) out.push({ kind: 'specimen', spec: s, x: s.x, y: s.y, hex: s.hex, size: s.size * 10 }); }
+    for (const q of this.artifactsNear(x, y, r, budget)) { if (q.depth > 1.8) continue; const sz = Math.sqrt(q.art.dims[0] * q.art.dims[1]); const exposed = (SURFACE[q.site.kind] ?? 0.05) * (q.site.kind === 'field' && q.site.to !== null ? 0.12 : 1); const vis = clamp(1 - cover * (1 - Math.min(1, sz / 90)) * 0.9, 0.05, 1) * (0.35 + 0.65 * light) * exposed; if (hash01(hash32(q.art.id), 77) < vis && Math.hypot(q.x - x, q.y - y) <= r) out.push({ kind: 'artifact', art: q.art, x: q.x, y: q.y, hex: ARC_HEX(q.art), size: Math.max(2, sz) }); }
+    for (const s of this.specimensNear(x, y, r)) { if (s.depth > 1 || s.kind === 'hotrock' || s.panOnly) continue; const sc = cellOf(s.x, s.y); const sed = this.w.L.sediment[sc]; const bare = sed === Sed.Bedrock || sed === Sed.Beach || s.transport.mode === 'river' || s.transport.mode === 'shore' || this.w.T.slope[sc] > 14 ? 1 : sed === Sed.Colluvium ? 0.5 : 0.12; const vis = clamp(1 - cover * (1 - Math.min(1, s.size / 12)), 0.1, 1) * (0.35 + 0.65 * light) * bare; if (hash01(hash32(s.id), 78) < vis) out.push({ kind: 'specimen', spec: s, x: s.x, y: s.y, hex: s.hex, size: s.size * 10 }); }
     void wx; return out;
   }
 }

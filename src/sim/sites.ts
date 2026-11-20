@@ -23,6 +23,8 @@ export interface Site {
 }
 export interface SiteSet { sites: Site[]; byId: Map<string, Site>; chunks: Map<number, number[]>; features: Feature[]; }
 
+/** Places anyone in the area knows about and searches: the starting point of every hunt. */
+export const KNOWN_GROUND = new Set<SiteKind>(['beach', 'fairground', 'picnic', 'town_common', 'schoolyard']);
 export const CH = 64; // spatial chunk size in metres
 export const chunkKey = (cx: number, cy: number) => cy * 4096 + cx;
 
@@ -218,8 +220,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
   for (const b of H.businesses) {
     if (!WORKS.includes(b.kind) || b.scale < 2) continue; const s = S.get(b.settlement)!; const end = Math.min(END, b.closed ?? END);
     const cur = s.current; const local = new Rng(hash32(seed + '|biz|' + b.id));
-    const reveal = !cur || hash01(hash32(b.id), 5) < 0.35 || b.kind === 'quarry' || b.kind === 'lime_kiln';
-    if (!reveal) continue; if (b.closed === undefined && cur) continue; // a working factory in a living town is not searchable
+    if (cur) continue; // in a living town the old works were demolished and built over; only dead towns keep their ruins
     let bx = b.x, by = b.y; if (b.kind === 'sawmill' || b.kind === 'mill' || b.kind === 'tannery' || b.kind === 'brickworks') { // move beside water
       for (let t = 0; t < 30; t++) { const x = bx + local.float(-250, 250), y = by + local.float(-250, 250); if (landAt(x, y) && inWorld(x, y) && T.Q[cellOf(x, y)] > CREEK_Q) { bx = x; by = y; break; } } }
     const site = mkSite('works', `Site of ${b.name}`, bx, by, 55, { refs: { business: b.id, settlement: s.id }, from: b.founded, to: end, ctxLabel: 'works site', access: 'public' });
@@ -327,6 +328,8 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
       if (s && s.port && a < 1960) out.push({ ctx: 'wharf' as Ctx, from: a, to: b, n: p * 0.12, note: 'boats pulled up on the shore' }); if (a >= 1960) out.push({ ctx: 'modern' as Ctx, from: a, to: b, n: 140 + p * 0.1, note: 'visitors' }); return out; });
     site.spots = [{ ctx: ['beach', 'wharf', 'modern'], x: site.x, y: site.y, r: 60, w: 1, kind: 'high-tide line', depth: [0, 28] }];
   }
+  // quiet countryside: travellers dropped little along roads and at crossings compared with homes, fairs and beaches
+  for (const st of sites) { if (st.kind === 'road' || st.kind === 'railway') st.densityMult *= 0.3; else if (st.kind === 'ford') st.densityMult *= 0.55; }
   // a site's life is the span of its activity (so no object can be dated outside it)
   for (const st of sites) { if (!st.acts.length || st.special) continue; st.from = Math.min(...st.acts.map(a => a.from)); const mx = Math.max(...st.acts.map(a => a.to)); st.to = mx >= END ? null : mx; }
   // ----------- index

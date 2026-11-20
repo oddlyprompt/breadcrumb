@@ -140,7 +140,7 @@ export class App {
     this.checkObjectives(); this.refresh();
   }
   onSite(s: Site, first: boolean) {
-    if (first && !['road', 'railway', 'field', 'beach', 'town_common', 'trailhead', 'campground', 'picnic'].includes(s.kind)) this.toast(`You are at ${s.name}.`);
+    if (first && !['road', 'railway', 'trailhead', 'campground'].includes(s.kind) && (s.access !== 'permission' || this.g.permissions[s.owner!] === 'granted')) this.toast(`You are at ${this.g.kb.includes(`site:${s.id}:known`) || s.kind === 'beach' ? s.name : s.kind === 'field' ? 'farmland' : 'an old site: compare what you see with the records'}.`);
     if (['town_core', 'farm', 'works', 'mine', 'station', 'fort', 'diggings'].includes(s.kind) && s.to !== null) { const st = s.refs.settlement ? this.w.H.settlements.find(q => q.id === s.refs.settlement) : undefined; if (st && this.g.kb.includes(`settlement:${st.id}`)) { learn(this.g, [`settlement:${st.id}:site`]); } }
     this.checkObjectives();
   }

@@ -62,7 +62,7 @@ input.q,select.q{width:100%;padding:5px 7px;font:inherit;background:#f7f0dc;bord
 .dev{font-family:'Courier New',monospace;font-size:11.5px}.dev table{border-collapse:collapse;width:100%}.dev td,.dev th{border-bottom:1px dotted var(--line);padding:2px 4px;text-align:left;vertical-align:top}
 .dev .q{font:12px Georgia,serif}.dev .ans{margin:0 0 6px;padding-left:8px;border-left:3px solid var(--moss)}
 .discover{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(#0008,#000d);z-index:8;animation:fade .3s}
-.discover .c{background:var(--parch);border:2px solid var(--brass);padding:18px 22px;width:min(460px,90%);text-align:center;box-shadow:0 0 60px #d9a91677}
+.discover .c{background:var(--parch);border:2px solid var(--brass);padding:14px 16px;width:min(460px,92%);max-height:92%;overflow:auto;text-align:center;box-shadow:0 0 60px #d9a91677}.discover canvas{width:min(220px,40vw);height:auto}
 .discover canvas{background:#262219;border:1px solid var(--line);margin:6px 0}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 .swatch{display:inline-block;width:10px;height:10px;border:1px solid #0006;margin-right:4px;vertical-align:-1px}
