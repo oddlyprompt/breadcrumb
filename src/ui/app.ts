@@ -46,7 +46,7 @@ export class App {
   }
   setView(v: 'field' | 'map') {
     this.view = v; this.field.cv.style.display = v === 'field' ? 'block' : 'none'; this.map.cv.style.display = v === 'map' ? 'block' : 'none'; this.field.setActive(v === 'field');
-    if (v === 'map') { this.map.resize(); this.map.centerOn(this.g.x, this.g.y, Math.max(this.map.scale, 0.012)); this.map.marker = null; } else this.field.cv.focus(); this.refresh(true);
+    if (v === 'map') { this.map.resize(); this.map.centerOn(this.g.x, this.g.y, Math.max(this.map.scale, 0.012)); this.map.marker = null; } else this.field.cv.focus(); this.mapHit = null; this.renderMapInfo(); this.refresh(true);
   }
   toast(msg: string, big = false) { this.toastEl.textContent = msg; this.toastEl.className = 'toast on' + (big ? ' big' : ''); clearTimeout(this.toastT); this.toastT = window.setTimeout(() => { this.toastEl.className = 'toast'; }, big ? 4200 : 2600); }
   save() { this.lastSave = Date.now(); const g = this.g; const s = this.w.H.settlements.find(q => q.id === this.w.start.settlement)!; const net = g.cash + 0; void s;
