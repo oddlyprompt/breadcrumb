@@ -19,7 +19,7 @@ export interface FieldCb { toast: (msg: string, big?: boolean) => void; found: (
 export class FieldView {
   cv: HTMLCanvasElement; c: CanvasRenderingContext2D; mode: Mode = 'walk'; ppm = 24; x: number; y: number; keys = new Set<string>(); mouse = { x: 0, y: 0, in: false };
   coil = { x: 0, y: 0, vx: 0, vy: 0 }; reading: { s: number; vdi: number; iron: boolean; depth: number; show: boolean } = { s: 0, vdi: 0, iron: false, depth: 0, show: false };
-  xray = false; tiles = new Map<number, HTMLCanvasElement>(); private last = performance.now(); private raf = 0; private tideNow = 0; puffs: Array<{ x: number; y: number; t: number; kind: string }> = [];
+  xray = false; touch = { down: false, sx: 0, sy: 0, t: 0, moved: false }; walkTarget: { x: number; y: number } | null = null; pinOn = false; tiles = new Map<number, HTMLCanvasElement>(); private last = performance.now(); private raf = 0; private tideNow = 0; puffs: Array<{ x: number; y: number; t: number; kind: string }> = [];
   private lastScan = 0; private audioStr = 0; private lastCoil = { x: 0, y: 0 }; panning = 0; running = false; private stepAcc = 0; private pinTimer = 0; private noteSite = '';
   private waterCv = document.createElement('canvas'); private seenFeat = new Set<string>(); private rt: any[] | null = null; hoverItem: any = null; digTimer = 0; lastMsg = '';
   constructor(host: HTMLElement, public w: World, public g: GameState, public S: Searcher, public snd: Sound, public cb: FieldCb) {
@@ -29,7 +29,18 @@ export class FieldView {
     window.addEventListener('keydown', this.kd); window.addEventListener('keyup', this.ku);
     this.cv.addEventListener('pointermove', e => { const r = this.cv.getBoundingClientRect(); this.mouse.x = e.clientX - r.left; this.mouse.y = e.clientY - r.top; this.mouse.in = true; });
     this.cv.addEventListener('pointerleave', () => { this.mouse.in = false; });
-    this.cv.addEventListener('pointerdown', e => { if (e.button === 0) this.act(); });
+    this.cv.addEventListener('pointerdown', e => {
+      const r = this.cv.getBoundingClientRect(); this.mouse.x = e.clientX - r.left; this.mouse.y = e.clientY - r.top; this.mouse.in = true;
+      if (e.pointerType === 'mouse') { if (e.button === 0) this.act(); return; }
+      this.snd.start(); this.cv.setPointerCapture(e.pointerId); this.touch = { down: true, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: false }; this.walkTarget = null;
+    });
+    this.cv.addEventListener('pointermove', e => { if (this.touch.down && Math.hypot(e.clientX - this.touch.sx, e.clientY - this.touch.sy) > 12) this.touch.moved = true; });
+    const up = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' || !this.touch.down) return; const tap = !this.touch.moved && performance.now() - this.touch.t < 350; this.touch.down = false;
+      if (this.mode === 'walk' || this.mode === 'search') { if (tap) { const m = this.mouseWorld(); const near = this.S.visibleItems(this.x, this.y, 3.2).some(it => Math.hypot(it.x - m.x, it.y - m.y) < 1.2 && Math.hypot(it.x - this.x, it.y - this.y) <= 3); if (near) this.pickNearest(); else this.walkTarget = m; } }
+      else if (this.mode === 'pan' && tap) this.act();
+    };
+    this.cv.addEventListener('pointerup', up); this.cv.addEventListener('pointercancel', up);
     this.cv.addEventListener('wheel', e => { e.preventDefault(); this.ppm = clamp(this.ppm * Math.exp(-e.deltaY * 0.0012), 5, 80); }, { passive: false });
     this.cv.tabIndex = 0;
   }
@@ -72,6 +83,9 @@ export class FieldView {
     const g = this.g, w = this.w; if (!this.active) return;
     const wx = weatherOn(w, g.day); this.tideNow = tideLevelAt(w, g.day * 1440 + g.minute); this.S.tide = this.tideNow;
     let mx = 0, my = 0; if (this.keys.has('w') || this.keys.has('arrowup')) my -= 1; if (this.keys.has('s') || this.keys.has('arrowdown')) my += 1; if (this.keys.has('a') || this.keys.has('arrowleft')) mx -= 1; if (this.keys.has('d') || this.keys.has('arrowright')) mx += 1;
+    if (mx || my) this.walkTarget = null;
+    if (!mx && !my) { let tgt: { x: number; y: number } | null = this.walkTarget; if (this.touch.down && (this.mode !== 'detect' || Math.hypot(this.mouseWorld().x - this.x, this.mouseWorld().y - this.y) > 2.7)) tgt = this.mouseWorld(); if (this.touch.down && this.mode === 'detect' && tgt && Math.hypot(tgt.x - this.x, tgt.y - this.y) <= 2.7) tgt = null;
+      if (tgt) { const dx = tgt.x - this.x, dy = tgt.y - this.y, d = Math.hypot(dx, dy); if (d > (this.mode === 'detect' ? 2.2 : 0.25)) { mx = dx / d; my = dy / d; } else this.walkTarget = null; } }
     const moving = mx || my; this.running = this.keys.has('shift') && this.mode !== 'detect';
     const c = cellOf(this.x, this.y); const slow = clamp(1 / Math.sqrt(Math.max(1, w.L.traverse[c] > 5 ? 5 : w.L.traverse[c])), 0.45, 1);
     const speed = (this.mode === 'detect' ? 2.1 : this.running ? 8 : 4.6) * slow;
@@ -95,7 +109,7 @@ export class FieldView {
     this.exploreChecks();
   }
   private detect(dt: number, coilSpeed: number) {
-    const S = this.S; const set = S.setup()!; const pin = this.keys.has('shift') || this.keys.has('p'); let hit = S.scan(this.coil.x, this.coil.y);
+    const S = this.S; const set = S.setup()!; const pin = this.keys.has('shift') || this.keys.has('p') || this.pinOn; let hit = S.scan(this.coil.x, this.coil.y);
     const acc = S.access(this.coil.x, this.coil.y); if (!acc.ok) hit = null;
     const pinOwned = this.g.equipped.pin ? GEARBY[this.g.equipped.pin] : null; const moving = coilSpeed > 0.22;
     this.snd.crackle(S.noise(this.coil.x, this.coil.y));
@@ -157,7 +171,7 @@ export class FieldView {
     if (this.mode === 'detect' && this.reading.show) {
       const r = this.reading; const set = this.S.setup()!; const x = vw - 190, y = 60; c.fillStyle = '#10190fe8'; c.strokeStyle = '#4a6252'; c.lineWidth = 1; c.fillRect(x, y, 170, 92); c.strokeRect(x, y, 170, 92);
       c.fillStyle = '#d7e8c7'; c.font = '11px Courier New'; c.fillText('TARGET', x + 10, y + 16);
-      if (this.g.equipped.pin && (this.keys.has('shift') || this.keys.has('p'))) { c.fillText('PINPOINT', x + 10, y + 34); c.fillStyle = '#ffd35a'; c.fillRect(x + 10, y + 46, 150 * r.s, 12); }
+      if (this.g.equipped.pin && (this.keys.has('shift') || this.keys.has('p') || this.pinOn)) { c.fillText('PINPOINT', x + 10, y + 34); c.fillStyle = '#ffd35a'; c.fillRect(x + 10, y + 46, 150 * r.s, 12); }
       else { if (set.det.s.vdi) { c.font = 'bold 34px Courier New'; c.fillStyle = r.iron ? '#c78a5a' : '#ffe27a'; c.fillText(String(r.vdi).padStart(2, '0'), x + 10, y + 56); c.font = '11px Courier New'; c.fillStyle = '#d7e8c7'; c.fillText(r.iron ? 'FERROUS' : r.vdi < 40 ? 'LOW COND.' : r.vdi < 60 ? 'MID-LOW' : r.vdi < 80 ? 'MID' : 'HIGH', x + 78, y + 40); c.fillText(`depth ~${Math.round(r.depth)} cm`, x + 78, y + 56); } else { c.font = 'bold 18px Courier New'; c.fillStyle = r.iron ? '#c78a5a' : '#ffe27a'; c.fillText(r.iron ? 'LOW TONE' : r.vdi >= 60 ? 'HIGH TONE' : 'MID TONE', x + 10, y + 44); }
         c.fillStyle = '#2e3d2a'; c.fillRect(x + 10, y + 70, 150, 8); c.fillStyle = '#ffd35a'; c.fillRect(x + 10, y + 70, 150 * clamp(r.s * 1.4, 0, 1), 8); }
     }

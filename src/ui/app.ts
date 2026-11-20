@@ -68,7 +68,8 @@ export class App {
     this.toolbar.innerHTML = ''; if (this.view !== 'field') { this.toolbar.style.display = 'none'; return; } this.toolbar.style.display = 'flex';
     const mk = (m: Mode, label: string, key: string) => { const b = h('button', { class: this.field.mode === m ? 'on' : '', onClick: () => { this.snd.start(); this.field.setMode(m); this.renderToolbar(); this.field.cv.focus(); } }, label, h('kbd', {}, key)); this.toolbar.append(b); };
     mk('walk', 'Walk', 'WASD'); mk('detect', 'Detect', 'Q'); mk('search', 'Surface', 'F'); mk('pan', 'Pan', 'G');
-    this.toolbar.append(h('button', { onClick: () => { this.field.ppm = Math.min(80, this.field.ppm * 1.4); } }, '+'), h('button', { onClick: () => { this.field.ppm = Math.max(5, this.field.ppm / 1.4); } }, '−'));
+    this.toolbar.append(h('button', { class: 'act', onClick: () => { this.snd.start(); this.field.act(); } }, 'Dig', h('kbd', {}, 'Space')), h('button', { class: this.field.pinOn ? 'on' : '', onClick: () => { this.field.pinOn = !this.field.pinOn; this.renderToolbar(); } }, 'Pinpoint', h('kbd', {}, 'P')));
+    this.toolbar.append(h('button', { class: 'zoom', onClick: () => { this.field.ppm = Math.min(80, this.field.ppm * 1.4); } }, '+'), h('button', { class: 'zoom', onClick: () => { this.field.ppm = Math.max(5, this.field.ppm / 1.4); } }, '−'));
   }
   private updateHud() {
     if (this.view !== 'field') { this.hudEl.innerHTML = ''; return; } const g = this.g, w = this.w, c = cellOf(this.field.x, this.field.y); const gr = this.S.groundAt(this.field.x, this.field.y); const acc = this.S.access(this.field.x, this.field.y);
