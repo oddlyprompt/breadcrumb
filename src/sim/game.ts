@@ -21,6 +21,7 @@ export function lakeMask(w: World, x: number, y: number): number { const fx = cl
 export function isWater(w: World, x: number, y: number, tide = 0): boolean { if (lakeMask(w, x, y) > 0.5) return true; const c = cellOf(x, y); if (w.T.coastDist[c] > CELL * 3) return false; return elevAt(w.T, x, y) < tide - 0.15; }
 
 export const SAVE_VERSION = 1;
+const BUCKET = 8; const bucketKey = (x: number, y: number) => Math.floor(y / BUCKET) * 100000 + Math.floor(x / BUCKET);
 const PUBLIC_IN_TOWN = new Set(['town_common', 'schoolyard', 'picnic', 'fairground', 'beach', 'town_dump']);
 export interface Bookmark { id: string; day: number; label: string; x: number; y: number; radius: number; doc?: string; note?: string }
 export interface JournalNote { id: string; day: number; kind: 'find' | 'place' | 'record' | 'link' | 'geology' | 'note' | 'objective'; title: string; text: string; x?: number; y?: number; ref?: string }
@@ -85,10 +86,25 @@ export class Searcher {
     const res = { n: evs.length, x, y, depth }; this.shifted.set(a.id, res); return res;
   }
   specimens(cx: number, cy: number): Specimen[] { const k = chunkKey(cx, cy); let s = this.specCache.get(k); if (!s) { s = specimensInChunk(this.w, cx, cy); this.specCache.set(k, s); if (this.specCache.size > 400) this.specCache.delete(this.specCache.keys().next().value!); } return s; }
-  artifactsNear(x: number, y: number, r: number): Array<{ art: Artifact; x: number; y: number; depth: number; site: Site }> {
-    const out: Array<{ art: Artifact; x: number; y: number; depth: number; site: Site }> = [];
-    for (const site of this.sitesNear(x, y, r)) { if (site.access === 'builtup') continue; const arts = generateSite(this.w, site); for (const a of arts) { if (this.g.recovered[a.id] !== undefined) continue; const p = this.pos(a, site); if (Math.abs(p.x - x) <= r && Math.abs(p.y - y) <= r) out.push({ art: a, ...p, site }); } }
-    return out;
+  /** Per-site spatial buckets of current positions, rebuilt only when storms or floods move things. */
+  private grids = new Map<string, { n: number; b: Map<number, Artifact[]> }>();
+  pending = 0;
+  private gridOf(site: Site): Map<number, Artifact[]> {
+    this.refreshEvents(); const n = site.dynamic === 'none' ? -1 : this.events.length; const have = this.grids.get(site.id); if (have && have.n === n) return have.b;
+    const b = new Map<number, Artifact[]>(); for (const a of generateSite(this.w, site)) { const p = this.pos(a, site); const k = bucketKey(p.x, p.y); const l = b.get(k); if (l) l.push(a); else b.set(k, [a]); }
+    this.grids.set(site.id, { n, b }); return b;
+  }
+  /** Objects within a square of half-size r. `budget` limits how many not-yet-generated sites are created in one call, so a busy place loads over a few frames instead of all at once. */
+  artifactsNear(x: number, y: number, r: number, budget = Infinity): Array<{ art: Artifact; x: number; y: number; depth: number; site: Site }> {
+    const out: Array<{ art: Artifact; x: number; y: number; depth: number; site: Site }> = []; let skipped = 0;
+    const bx0 = Math.floor((x - r) / BUCKET), bx1 = Math.floor((x + r) / BUCKET), by0 = Math.floor((y - r) / BUCKET), by1 = Math.floor((y + r) / BUCKET);
+    for (const site of this.sitesNear(x, y, r)) {
+      if (site.access === 'builtup') continue;
+      if (!this.w.artCache.has(site.id)) { if (budget <= 0) { skipped++; continue; } budget--; }
+      const grid = this.gridOf(site);
+      for (let by = by0; by <= by1; by++) for (let bx = bx0; bx <= bx1; bx++) { const l = grid.get(by * 100000 + bx); if (!l) continue; for (const a of l) { if (this.g.recovered[a.id] !== undefined) continue; const p = this.pos(a, site); if (Math.abs(p.x - x) <= r && Math.abs(p.y - y) <= r) out.push({ art: a, ...p, site }); } }
+    }
+    this.pending = skipped; return out;
   }
   specimensNear(x: number, y: number, r: number): Specimen[] {
     const out: Specimen[] = []; for (let cy = Math.floor((y - r) / CH); cy <= Math.floor((y + r) / CH); cy++) for (let cx = Math.floor((x - r) / CH); cx <= Math.floor((x + r) / CH); cx++) for (const s of this.specimens(cx, cy)) if (this.g.recovered[s.id] === undefined && Math.abs(s.x - x) <= r && Math.abs(s.y - y) <= r) out.push(s); return out;
@@ -109,9 +125,9 @@ export class Searcher {
     return i;
   }
   /** detector targets near a point: artifacts that are metal plus hot rocks */
-  targetsNear(x: number, y: number, r: number): Array<Target & { art?: Artifact; spec?: Specimen }> {
+  targetsNear(x: number, y: number, r: number, budget = Infinity): Array<Target & { art?: Artifact; spec?: Specimen }> {
     const t: Array<Target & { art?: Artifact; spec?: Specimen }> = [];
-    for (const q of this.artifactsNear(x, y, r)) t.push({ id: q.art.id, x: q.x, y: q.y, depth: q.depth, mat: q.art.mat, L: q.art.dims[0], W: q.art.dims[1], mass: q.art.mass, art: q.art });
+    for (const q of this.artifactsNear(x, y, r, budget)) t.push({ id: q.art.id, x: q.x, y: q.y, depth: q.depth, mat: q.art.mat, L: q.art.dims[0], W: q.art.dims[1], mass: q.art.mass, art: q.art });
     for (const s of this.specimensNear(x, y, r)) if (s.kind === 'hotrock') t.push({ id: s.id, x: s.x, y: s.y, depth: s.depth, mat: 'iron', L: 80, W: 80, mass: s.mass, hot: true, spec: s });
     return t;
   }
@@ -120,15 +136,15 @@ export class Searcher {
   scan(x: number, y: number): { r: Response; target: Target & { art?: Artifact; spec?: Specimen }; all: number } | null {
     const set = this.setup(); if (!set) return null; const gr = this.groundAt(x, y); const gi = groundInfo({ mineral: gr.mineral, moist: gr.moist, salt: gr.salt }, this.interferenceAt(x, y), wetnessOn(this.w, this.g.day, 0));
     let best: { r: Response; target: any } | null = null; let all = 0;
-    for (const t of this.targetsNear(x, y, 0.9)) { const r = response(set, t, t.x - x, t.y - y, gi, Math.floor(this.g.minute / 5)); all++; if (r.audible && (!best || r.s > best.r.s)) best = { r, target: t }; }
+    for (const t of this.targetsNear(x, y, 0.9, 2)) { const r = response(set, t, t.x - x, t.y - y, gi, Math.floor(this.g.minute / 5)); all++; if (r.audible && (!best || r.s > best.r.s)) best = { r, target: t }; }
     return best ? { ...best, all } : null;
   }
   /** background noise sound level for UI audio */
   noise(x: number, y: number): number { const set = this.setup(); if (!set) return 0; const gr = this.groundAt(x, y); return gr.mineral * (1 - (set.det.s.gb as number)) * (0.4 + gr.moist) + this.interferenceAt(x, y); }
-  visibleItems(x: number, y: number, r: number): Array<{ kind: 'artifact' | 'specimen'; art?: Artifact; spec?: Specimen; x: number; y: number; hex: string; size: number }> {
+  visibleItems(x: number, y: number, r: number, budget = 2): Array<{ kind: 'artifact' | 'specimen'; art?: Artifact; spec?: Specimen; x: number; y: number; hex: string; size: number }> {
     const out: any[] = []; const ground = this.groundAt(x, y); const cover = ground.veg === Veg.Conifer || ground.veg === Veg.Mixed || ground.veg === Veg.Broadleaf ? 0.6 : ground.veg === Veg.Grass || ground.veg === Veg.Heath || ground.veg === Veg.Shrub ? 0.45 : ground.veg === Veg.Wetland ? 0.5 : 0.1;
     const light = lightLevel(this.g.day, this.g.minute); const wx = weatherOn(this.w, this.g.day);
-    for (const q of this.artifactsNear(x, y, r)) { if (q.depth > 1.8) continue; const sz = Math.sqrt(q.art.dims[0] * q.art.dims[1]); const vis = clamp(1 - cover * (1 - Math.min(1, sz / 90)) * 0.9, 0.05, 1) * (0.35 + 0.65 * light); if (hash01(hash32(q.art.id), 77) < vis && Math.hypot(q.x - x, q.y - y) <= r) out.push({ kind: 'artifact', art: q.art, x: q.x, y: q.y, hex: ARC_HEX(q.art), size: Math.max(2, sz) }); }
+    for (const q of this.artifactsNear(x, y, r, budget)) { if (q.depth > 1.8) continue; const sz = Math.sqrt(q.art.dims[0] * q.art.dims[1]); const vis = clamp(1 - cover * (1 - Math.min(1, sz / 90)) * 0.9, 0.05, 1) * (0.35 + 0.65 * light); if (hash01(hash32(q.art.id), 77) < vis && Math.hypot(q.x - x, q.y - y) <= r) out.push({ kind: 'artifact', art: q.art, x: q.x, y: q.y, hex: ARC_HEX(q.art), size: Math.max(2, sz) }); }
     for (const s of this.specimensNear(x, y, r)) { if (s.depth > 1 || s.kind === 'hotrock' || s.panOnly) continue; const vis = clamp(1 - cover * (1 - Math.min(1, s.size / 12)), 0.1, 1) * (0.35 + 0.65 * light); if (hash01(hash32(s.id), 78) < vis) out.push({ kind: 'specimen', spec: s, x: s.x, y: s.y, hex: s.hex, size: s.size * 10 }); }
     void wx; return out;
   }

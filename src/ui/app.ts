@@ -23,6 +23,7 @@ export interface Panel { id: string; label: string; render: (app: App, el: HTMLE
 export class App {
   S: Searcher; snd = new Sound(); field!: FieldView; map!: MapView; view: 'field' | 'map' = 'field'; tab = 'pack'; selected: string | null = null; private toastEl!: HTMLElement; private toastT = 0;
   private paneEl!: HTMLElement; private tabsEl!: HTMLElement; private topEl!: HTMLElement; private viewHost!: HTMLElement; private toolbar!: HTMLElement; private mapInfo!: HTMLElement; private hudEl!: HTMLElement; private mapBar!: HTMLElement;
+  private hudHtml = ''; private hudT = 0;
   private actions = 0; private lastSave = Date.now(); lastTier = 0; devOn = false; private panels: Panel[]; mapHit: MapHit | null = null; selDoc: string | null = null; shopBuyer = 0; devTab = 'world';
   constructor(public root: HTMLElement, public w: World, public g: GameState, public saveId: string, public onQuit: () => void) {
     this.S = new Searcher(w, g); this.snd.vol = loadVol();
@@ -72,9 +73,11 @@ export class App {
     this.toolbar.append(h('button', { class: 'zoom', onClick: () => { this.field.ppm = Math.min(80, this.field.ppm * 1.4); } }, '+'), h('button', { class: 'zoom', onClick: () => { this.field.ppm = Math.max(5, this.field.ppm / 1.4); } }, '−'));
   }
   private updateHud() {
-    if (this.view !== 'field') { this.hudEl.innerHTML = ''; return; } const g = this.g, w = this.w, c = cellOf(this.field.x, this.field.y); const gr = this.S.groundAt(this.field.x, this.field.y); const acc = this.S.access(this.field.x, this.field.y);
+    if (performance.now() - this.hudT < 200) return; this.hudT = performance.now();
+    if (this.view !== 'field') { if (this.hudHtml) { this.hudHtml = ''; this.hudEl.innerHTML = ''; } return; } const g = this.g, w = this.w, c = cellOf(this.field.x, this.field.y); const gr = this.S.groundAt(this.field.x, this.field.y); const acc = this.S.access(this.field.x, this.field.y);
     const set = this.S.setup(); const dg = g.equipped.digger === 'hands' ? 'bare hands' : '';
-    this.hudEl.innerHTML = `<div class="panel small">${esc(SED_NAMES[gr.sed])} · ${esc(VEG_NAMES[gr.veg])}<br>Mode: <b>${this.field.mode}</b>${set ? ` · ${esc(set.det.name)}` : ' · no detector'}${dg ? ' · ' + dg : ''}<br>${acc.ok ? '<span style="color:#9fd18a">Open to search</span>' : `<span style="color:#f0a090">${esc(acc.reason)}</span>`}${acc.farm ? ` <a class="lnk" id="ask" style="pointer-events:auto;color:#ffd98a">Ask permission</a>` : ''}</div>`;
+    const html = `<div class="panel small">${esc(SED_NAMES[gr.sed])} · ${esc(VEG_NAMES[gr.veg])}<br>Mode: <b>${this.field.mode}</b>${set ? ` · ${esc(set.det.name)}` : ' · no detector'}${dg ? ' · ' + dg : ''}<br>${acc.ok ? '<span style="color:#9fd18a">Open to search</span>' : `<span style="color:#f0a090">${esc(acc.reason)}</span>`}${acc.farm ? ` <a class="lnk" id="ask" style="pointer-events:auto;color:#ffd98a">Ask permission</a>` : ''}${this.S.pending ? '<br><span class="tiny">Loading this area…</span>' : ''}</div>`;
+    if (html === this.hudHtml) return; this.hudHtml = html; this.hudEl.innerHTML = html;
     const ask = this.hudEl.querySelector('#ask'); if (ask) (ask as HTMLElement).onclick = () => { import('../sim/game').then(m => { const r = m.askPermission(this.S, acc.farm!); this.toast(r.msg, r.granted); this.refresh(); }); };
   }
   private renderMapBar() {

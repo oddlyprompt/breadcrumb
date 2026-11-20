@@ -19,6 +19,7 @@ export interface FieldCb { toast: (msg: string, big?: boolean) => void; found: (
 export class FieldView {
   cv: HTMLCanvasElement; c: CanvasRenderingContext2D; mode: Mode = 'walk'; ppm = 24; x: number; y: number; keys = new Set<string>(); mouse = { x: 0, y: 0, in: false };
   coil = { x: 0, y: 0, vx: 0, vy: 0 }; reading: { s: number; vdi: number; iron: boolean; depth: number; show: boolean } = { s: 0, vdi: 0, iron: false, depth: 0, show: false };
+  private visCache: { t: number; x: number; y: number; r: number; items: any[] } | null = null; invalidateVisible() { this.visCache = null; }
   xray = false; touch = { down: false, sx: 0, sy: 0, t: 0, moved: false }; walkTarget: { x: number; y: number } | null = null; pinOn = false; tiles = new Map<number, HTMLCanvasElement>(); private last = performance.now(); private raf = 0; private tideNow = 0; puffs: Array<{ x: number; y: number; t: number; kind: string }> = [];
   private lastScan = 0; private audioStr = 0; private lastCoil = { x: 0, y: 0 }; panning = 0; running = false; private stepAcc = 0; private pinTimer = 0; private noteSite = '';
   private waterCv = document.createElement('canvas'); private seenFeat = new Set<string>(); private rt: any[] | null = null; hoverItem: any = null; digTimer = 0; lastMsg = '';
@@ -45,9 +46,14 @@ export class FieldView {
     this.cv.tabIndex = 0;
   }
   destroy() { cancelAnimationFrame(this.raf); window.removeEventListener('keydown', this.kd); window.removeEventListener('keyup', this.ku); this.cv.remove(); }
-  start() { this.last = performance.now(); const loop = (t: number) => { const dt = Math.min(0.05, (t - this.last) / 1000); this.last = t; this.update(dt); this.draw(); this.raf = requestAnimationFrame(loop); }; this.raf = requestAnimationFrame(loop); }
-  resize() { const r = this.cv.parentElement!.getBoundingClientRect(); const dpr = Math.min(2, window.devicePixelRatio || 1); this.cv.width = r.width * dpr; this.cv.height = r.height * dpr; this.cv.style.width = r.width + 'px'; this.cv.style.height = r.height + 'px'; this.c.setTransform(dpr, 0, 0, dpr, 0, 0); }
-  get vw() { return this.cv.width / Math.min(2, window.devicePixelRatio || 1); } get vh() { return this.cv.height / Math.min(2, window.devicePixelRatio || 1); }
+  quality = 2; private frameEma = 0.016; private qT = 0;
+  start() { this.last = performance.now(); const loop = (t: number) => { const raw = (t - this.last) / 1000; const dt = Math.min(0.05, raw); this.last = t; this.update(dt); this.draw(); this.adapt(raw); this.raf = requestAnimationFrame(loop); }; this.raf = requestAnimationFrame(loop); }
+  /** Drop detail and resolution on slow devices so the game stays responsive. */
+  private adapt(raw: number) { if (!this.active || raw > 0.5) return; this.frameEma = this.frameEma * 0.93 + raw * 0.07; const now = performance.now(); if (now - this.qT < 2500) return;
+    if (this.frameEma > 0.045 && this.quality > 0) { this.quality--; this.qT = now; this.resize(); } else if (this.frameEma < 0.02 && this.quality < 2) { this.quality++; this.qT = now; this.resize(); } }
+  resize() { const r = this.cv.parentElement!.getBoundingClientRect(); const dpr = Math.min(this.quality >= 2 ? 2 : this.quality === 1 ? 1.25 : 0.85, window.devicePixelRatio || 1); this.cv.width = r.width * dpr; this.cv.height = r.height * dpr; this.cv.style.width = r.width + 'px'; this.cv.style.height = r.height + 'px'; this.c.setTransform(dpr, 0, 0, dpr, 0, 0); }
+  private dpr() { return Math.min(this.quality >= 2 ? 2 : this.quality === 1 ? 1.25 : 0.85, window.devicePixelRatio || 1); }
+  get vw() { return this.cv.width / this.dpr(); } get vh() { return this.cv.height / this.dpr(); }
   private active = true; setActive(a: boolean) { this.active = a; }
   kd = (e: KeyboardEvent) => { if (!this.active || (e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'SELECT') return; const k = e.key.toLowerCase(); this.keys.add(k); if (k === ' ') { e.preventDefault(); this.act(); } if (k === 'e') this.pickNearest(); if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault(); };
   ku = (e: KeyboardEvent) => { this.keys.delete(e.key.toLowerCase()); };
@@ -64,7 +70,7 @@ export class FieldView {
     const res = this.mode === 'pan' ? this.panAt(tx, ty) : dig(S, tx, ty);
     if (!res.ok) { this.cb.toast(res.msg); this.snd.deny(); return; }
     this.snd.dig(); this.puffs.push({ x: tx, y: ty, t: 0, kind: this.mode === 'pan' ? 'splash' : 'dust' }); if (this.mode === 'pan') this.snd.splash(); this.digTimer = 0.45;
-    if (res.msg && !res.got.length) this.cb.toast(res.msg); if (res.got.length) { this.cb.found(res.got); } this.cb.changed();
+    this.visCache = null; if (res.msg && !res.got.length) this.cb.toast(res.msg); if (res.got.length) { this.cb.found(res.got); } this.cb.changed();
   }
   private panAt(x: number, y: number) {
     const g = this.g; const saved = g.equipped.digger; const gear = Object.keys(g.owned).map(k => GEARBY[k]).filter(q => q.cat === 'pan').sort((a, b) => b.tier - a.tier)[0];
@@ -77,7 +83,7 @@ export class FieldView {
     for (const it of items) { const d = Math.hypot(it.x - m.x, it.y - m.y) * 0.7 + Math.hypot(it.x - this.x, it.y - this.y) * 0.3; if (Math.hypot(it.x - this.x, it.y - this.y) <= 3 && d < bd) { bd = d; best = it; } }
     if (!best) { if (this.mode === 'search') this.cb.toast('Nothing within reach. Look for glints on the ground.'); return; }
     const r = pickUp(this.S, { art: best.art, spec: best.spec }); if (!r) { this.cb.toast(this.S.access(best.x, best.y).ok ? 'Your bags are full.' : this.S.access(best.x, best.y).reason); return; }
-    this.snd.recover(0); this.cb.found([r]); this.cb.changed();
+    this.visCache = null; this.snd.recover(0); this.cb.found([r]); this.cb.changed();
   }
   update(dt: number) {
     const g = this.g, w = this.w; if (!this.active) return;
@@ -139,16 +145,16 @@ export class FieldView {
     const x0 = this.x - halfW, x1 = this.x + halfW, y0 = this.y - halfH, y1 = this.y + halfH;
     c.fillStyle = '#25343f'; c.fillRect(0, 0, vw, vh); c.imageSmoothingEnabled = true;
     for (let ty = Math.floor(y0 / TILE_M); ty <= Math.floor(y1 / TILE_M); ty++) for (let tx = Math.floor(x0 / TILE_M); tx <= Math.floor(x1 / TILE_M); tx++) { if (tx < 0 || ty < 0 || tx * TILE_M > SIZE || ty * TILE_M > SIZE) continue; const t = this.tileFor(tx, ty); c.drawImage(t, X(tx * TILE_M) - 0.5, Y(ty * TILE_M) - 0.5, TILE_M * ppm + 1, TILE_M * ppm + 1); }
-    if (ppm >= 11) this.drawDetail(c, X, Y, x0, y0, x1, y1);
+    if (ppm >= 11 && this.quality >= 2) this.drawDetail(c, X, Y, x0, y0, x1, y1);
     this.drawFields(c, X, Y, x0, y0, x1, y1); this.drawRoutes(c, X, Y, x0, y0, x1, y1); this.drawRivers(c, X, Y, x0, y0, x1, y1); this.drawWater(c, X, Y, x0, y0, x1, y1);
     this.drawFeatures(c, X, Y, x0, y0, x1, y1); this.drawTown(c, X, Y, x0, y0, x1, y1);
     // holes
     for (const h of g.holes) { if (h.x < x0 - 1 || h.x > x1 + 1 || h.y < y0 - 1 || h.y > y1 + 1) continue; const r = Math.max(2, 0.09 * ppm); c.fillStyle = '#4a3a26'; c.beginPath(); c.arc(X(h.x), Y(h.y), r * 1.25, 0, 7); c.fill(); c.fillStyle = '#6b5a3c'; c.beginPath(); c.arc(X(h.x) + r * 0.2, Y(h.y) + r * 0.15, r * 0.7, 0, 7); c.fill(); }
     // surface items
-    const t = performance.now() / 1000; const vis = this.S.visibleItems(this.x, this.y, Math.max(halfW, halfH) + 1);
+    const t = performance.now() / 1000; const vr = Math.max(halfW, halfH) + 1; const vc = this.visCache; if (!vc || performance.now() - vc.t > 200 || Math.hypot(vc.x - this.x, vc.y - this.y) > 1 || Math.abs(vc.r - vr) > 1 || this.S.pending) this.visCache = { t: performance.now(), x: this.x, y: this.y, r: vr, items: this.S.visibleItems(this.x, this.y, vr) }; const vis = this.visCache!.items;
     for (const it of vis) { const px = X(it.x), py = Y(it.y); if (px < -20 || px > vw + 20 || py < -20 || py > vh + 20) continue; const near = Math.hypot(it.x - this.x, it.y - this.y) <= 3; const sz = clamp(it.size * 0.0012 * ppm * 4 + 2.2, 2.2, 14); c.fillStyle = it.hex; c.strokeStyle = '#0008'; c.lineWidth = 1; c.beginPath(); c.arc(px, py, sz, 0, 7); c.fill(); c.stroke(); if (near || this.mode === 'search') { const k = 0.5 + 0.5 * Math.sin(t * 4 + it.x); c.strokeStyle = `rgba(255,248,200,${0.35 + 0.5 * k})`; c.lineWidth = 1.5; c.beginPath(); c.arc(px, py, sz + 3 + k * 2, 0, 7); c.stroke(); } }
     // x-ray (developer)
-    if (this.xray) for (const q of this.S.artifactsNear(this.x, this.y, Math.max(halfW, halfH) + 1)) { const v = trueValue(w, q.art); c.fillStyle = ['#ffffff88', '#7fc6ffcc', '#ffcf3fdd', '#ff4d2eee'][v.tier]; c.beginPath(); c.arc(X(q.x), Y(q.y), 2 + v.tier * 1.5, 0, 7); c.fill(); if (q.depth > 1.8) { c.strokeStyle = '#0006'; c.stroke(); } }
+    if (this.xray) for (const q of this.S.artifactsNear(this.x, this.y, Math.max(halfW, halfH) + 1, 2)) { const v = trueValue(w, q.art); c.fillStyle = ['#ffffff88', '#7fc6ffcc', '#ffcf3fdd', '#ff4d2eee'][v.tier]; c.beginPath(); c.arc(X(q.x), Y(q.y), 2 + v.tier * 1.5, 0, 7); c.fill(); if (q.depth > 1.8) { c.strokeStyle = '#0006'; c.stroke(); } }
     if (this.xray) for (const s of this.S.specimensNear(this.x, this.y, Math.max(halfW, halfH) + 1)) { c.fillStyle = s.kind === 'native' ? '#ffd400' : s.kind === 'fossil' ? '#b57cff' : s.kind === 'hotrock' ? '#ff00aa' : '#00d1a0'; c.fillRect(X(s.x) - 2, Y(s.y) - 2, 4, 4); }
     for (const p of this.puffs) { const k = p.t; c.globalAlpha = 1 - k; c.fillStyle = p.kind === 'splash' ? '#9fc8e0' : '#8a7550'; for (let i = 0; i < 7; i++) { const a = i * 0.9 + p.x; c.beginPath(); c.arc(X(p.x) + Math.cos(a) * k * 18, Y(p.y) + Math.sin(a) * k * 18 - k * 8, 2 + (1 - k) * 3, 0, 7); c.fill(); } c.globalAlpha = 1; }
     this.drawTrees(c, X, Y, x0, y0, x1, y1);
