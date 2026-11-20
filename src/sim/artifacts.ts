@@ -59,7 +59,7 @@ export function envAt(w: World, x: number, y: number, depthCm: number, ctx: Ctx,
 }
 
 function pickSpot(site: Site, ctx: Ctx, r: Rng): Spot | null {
-  const cands = site.spots.filter(s => s.ctx.includes(ctx)); if (!cands.length) return null;
+  let cands = site.spots.filter(s => s.ctx.includes(ctx)); if (!cands.length && site.shape.t === 'line') cands = site.spots; if (!cands.length) return null;
   const tot = cands.reduce((a, s) => a + s.w, 0); let x = r.next() * tot; for (const s of cands) { x -= s.w; if (x <= 0) return s; } return cands[0];
 }
 
@@ -243,7 +243,8 @@ function specials(w: World, I: Idx, site: Site, out: Artifact[], r: Rng, next: (
     const c = H.caches.find(q => q.id === site.special.cache)!; const ev = H.events.find(q => q.id === c.event)!;
     const person = c.owner; const base: { assoc: Artifact['assoc']; kind: string; origin: string; special: string } = { assoc: { event: ev.id, persons: [person], cache: c.id, settlement: ev.settlement }, kind: 'cache', origin: `hidden by ${H.people.find(p => p.id === person)?.name ?? 'someone unknown'}`, special: 'cache' };
     const containerArch = c.container.includes('crock') ? ARC['stone_crock'] : c.container.includes('kettle') ? ARC['cookpot'] : c.container.includes('tin') ? ARC['tobacco_tin'] : c.container.includes('jar') ? ARC['jar_canning'] : ARC['cash_box_part'];
-    if (containerArch.from <= c.year) add(containerArch, 'home', c.year, { x: c.x, y: c.y, depth: c.depth, ...base, spot: 'cache container' });
+    const cont = containerArch.from <= c.year && (containerArch.to === null || containerArch.to + 25 >= c.year) ? containerArch : ARC['tobacco_tin'];
+    if (cont.from <= c.year) add(cont, 'home', c.year, { x: c.x, y: c.y, depth: c.depth, ...base, spot: 'cache container' });
     let remaining = c.value * 100 * 0.12; const metalPref = ['coin_gold', 'coin_silver', 'coin_cupronickel', 'coin_copper'];
     const picks: Array<{ s: CoinSeries; n: number }> = [];
     let guard = 0;
@@ -306,6 +307,7 @@ function taphonomy(w: World, site: Site, a: Artifact, r: Rng) {
       const wdt = riverWidth(w.T.Q[cur]); const off = wdt * 0.5 + 1 + r.next() * 15; const ang = r.next() * Math.PI * 2;
       const nx2 = clamp(px + Math.cos(ang) * off, 5, SIZE - 5), ny2 = clamp(py + Math.sin(ang) * off, 5, SIZE - 5); const moved = Math.hypot(nx2 - fx, ny2 - fy);
       if (moved < 2) continue;
+      if (Math.hypot(nx2 - a.x0, ny2 - a.y0) > 1300) continue; // the flood zone ends here
       a.moves.push({ kind: 'flood', year: f.year, event: f.event || undefined, fromX: a.x, fromY: a.y, toX: nx2, toY: ny2, dist: moved }); a.x = nx2; a.y = ny2; a.depth = 4 + r.next() * 50; a.cond.dmg = Math.min(1, a.cond.dmg + 0.06);
     }
   } else if (site.dynamic === 'beach' && a.ctx !== 'wreck') {
@@ -321,8 +323,9 @@ function beachStorms(w: World, a: Artifact, r: Rng, wreck = false) {
     // along-shore drift: tangent to the coast (perpendicular to the direction of the sea)
     const cx = c % N, cy = (c / N) | 0; let gx = 0, gy = 0; for (let k = 0; k < 8; k++) { const nx = cx + DX[k], ny = cy + DY[k]; if (inb(nx, ny)) { const d = w.T.coastDist[idx(nx, ny)]; gx += DX[k] * d; gy += DY[k] * d; } }
     const gl = Math.hypot(gx, gy) || 1; const tx = -gy / gl, ty = gx / gl; const sgn = Math.cos(st.windAngle) * tx + Math.sin(st.windAngle) * ty >= 0 ? 1 : -1;
-    const dist = (30 + st.severity * 60 * r.next()) * (wreck ? 1.5 : 1) / Math.pow(Math.max(1, a.mass), 0.12);
+    const dist = (15 + st.severity * 40 * r.next()) * (wreck ? 1.5 : 1) / Math.pow(Math.max(1, a.mass), 0.12);
     const nx = clamp(a.x + tx * sgn * dist, 5, SIZE - 5), ny = clamp(a.y + ty * sgn * dist, 5, SIZE - 5);
+    if (Math.hypot(nx - a.x0, ny - a.y0) > 420) { a.depth = r.next() * 18; continue; } // beyond the active shore: re-buried in place rather than carried further
     a.moves.push({ kind: 'storm', year: st.year, event: st.event || undefined, fromX: a.x, fromY: a.y, toX: nx, toY: ny, dist }); a.x = nx; a.y = ny; a.depth = r.next() * 18;
   }
 }

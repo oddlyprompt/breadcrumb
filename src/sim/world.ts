@@ -13,17 +13,22 @@ import { CULTURES, Namer } from './names';
 import type { World } from './worldtypes';
 
 export { GEN_VERSION };
-export function generateWorld(seed: string): World {
+export function generateWorld(seed: string, progress: (msg: string, frac: number) => void = () => {}): World {
   const rng = stream(seed, 'culture');
   const culture = rng.pick(CULTURES);
+  progress('Raising mountains and carving valleys…', 0.05);
   const T = generateTerrain(seed);
+  progress('Laying down rock formations and faults…', 0.2);
   const G = generateGeology(seed, T, culture);
+  progress('Concentrating minerals where the geology allows…', 0.3);
   const D = generateDeposits(seed, T, G, culture);
   const L = generateLandscape(seed, T, G);
   const geo = nameGeography(seed, T, L, culture);
+  progress('Living four hundred years of history…', 0.45);
   const H = simulateHistory(seed, { T, L, G, D, geo }, culture);
   const coin = makeCoinage(seed, H, culture);
   const issues = makeIssues(seed, H, culture);
+  progress('Leaving traces in the ground…', 0.7);
   const sites = buildSites(seed, T, L, G, D, H, culture);
   const w: World = {
     seed, genVersion: GEN_VERSION, name: '', culture, T, G, D, L, geo, H, coin, issues, sites, start: { settlement: '', x: 0, y: 0, reason: '' }, docs: [],
@@ -32,8 +37,10 @@ export function generateWorld(seed: string): World {
   const nm = new Namer(culture, stream(seed, 'worldname'));
   const range = geo.features.find(f => f.kind === 'range');
   w.name = range ? `The ${range.name.replace(/s$/, '')} Country` : `The ${nm.stem(2)} Coast`;
+  progress('Filing the archives…', 0.88);
   w.docs = generateDocuments(w);
   w.start = chooseStart(w);
+  progress('Done', 1);
   return w;
 }
 

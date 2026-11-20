@@ -339,7 +339,7 @@ export function simulateHistory(seed: string, ctx: Ctx, culture: Culture): Histo
       if (year >= 1900 && d.bulk) town.pop = 700;
     }
     // --- placer gold rushes
-    if (year >= 1700 && year % 1 === 0 && r.chance(0.04 * Math.min(1.3, ec))) {
+    if (year >= 1700 && year <= endYear - 8 && r.chance(0.04 * Math.min(1.3, ec))) {
       const trains = D.placers.filter(p => { const d = D.deposits.find(q => q.id === p.sourceId)!; const peak = p.cells.reduce((a, c) => c.richness > a.richness ? c : a, p.cells[0]); return !H.events.some(e => e.kind === 'gold_rush' && e.deposit === p.sourceId) && act.some(s => dist(s.cell, peak.cell) < 45) && d.grade > 2; });
       if (trains.length) {
         const tr = r.pick(trains); const d = D.deposits.find(q => q.id === tr.sourceId)!;

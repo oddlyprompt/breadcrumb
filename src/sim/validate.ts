@@ -84,6 +84,7 @@ export function validateWorld(w: World, opts: { siteSample?: number } = {}): Rep
       if (a.x < 0 || a.y < 0 || a.x > N * CELL || a.y > N * CELL) bad('artifact', 'outside world');
       const c = cellOf(a.x, a.y); if (T.sea[c] && a.lossKind !== 'wreck') bad('artifact', `${a.id} in the sea`);
       if (!a.lossKind || !a.site) bad('artifact', 'no deposition explanation');
+      if (!a.special && (a.x < site.bbox[0] - 2 || a.x > site.bbox[2] + 2 || a.y < site.bbox[1] - 2 || a.y > site.bbox[3] + 2)) bad('artifact', `${a.id} lies outside its site's indexed area (${Math.round(Math.hypot(a.x - site.x, a.y - site.y))} m from centre)`);
       for (const mv of a.moves) { if (mv.year < a.deposited) bad('artifact', 'moved before deposited'); if (mv.kind === 'flood' && !H.floods.some(f => f.year === mv.year)) bad('artifact', 'flood move without flood'); if (mv.kind === 'storm' && !H.storms.some(f => f.year === mv.year)) bad('artifact', 'storm move without storm'); }
       if (a.cond.encrust < 0 || a.cond.encrust > 1 || a.cond.frag <= 0) bad('artifact', 'bad condition values');
     }

@@ -1,0 +1,13 @@
+# Wave 1 checklist
+- [x] New game, seed selection, worker generation with progress
+- [x] Geography, geology (11 deposit models), 400-year history, artifacts (150+ archetypes), documents
+- [x] Regional map: shading, contours, rivers, roads, labels, geology and historical overlays, discoveries
+- [x] Local view: terrain, rivers, tides, roads, ruins, trees, weather, day and night
+- [x] Surface search, beachcombing, prospecting and panning, metal detecting with pinpointing, digging, persistent depletion
+- [x] Archive search, bookmarks, journal, collections, progressive identification, cleaning, appraiser
+- [x] Buyers (five), shop (32 items), environmental change (storms, floods, tide)
+- [x] Save and load (IndexedDB, versioned), export and import
+- [x] Procedural visuals and audio with volume controls
+- [x] Developer inspector (provenance, geology, history, economy, chains, X-ray, in-game validation)
+- [x] Automated validation (`npm run validate`) and vitest suite
+- [ ] Real-device and long-session tuning; deeper balance pass on item rarity tiers

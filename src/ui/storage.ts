@@ -1,0 +1,7 @@
+import type { GameState } from '../sim/game';
+// Versioned saves in IndexedDB. The world is never stored: it is regenerated from (seed, generation version).
+export interface SaveRec { id: string; name: string; seed: string; genVersion: number; saveVersion: number; updated: number; summary: string; state: GameState; }
+function open(): Promise<IDBDatabase> { return new Promise((res, rej) => { const r = indexedDB.open('breadcrumb', 1); r.onupgradeneeded = () => { r.result.createObjectStore('saves', { keyPath: 'id' }); }; r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+export async function putSave(rec: SaveRec): Promise<void> { const db = await open(); await new Promise<void>((res, rej) => { const tx = db.transaction('saves', 'readwrite'); tx.objectStore('saves').put(rec); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+export async function listSaves(): Promise<SaveRec[]> { const db = await open(); return new Promise((res, rej) => { const rq = db.transaction('saves').objectStore('saves').getAll(); rq.onsuccess = () => res((rq.result as SaveRec[]).sort((a, b) => b.updated - a.updated)); rq.onerror = () => rej(rq.error); }); }
+export async function deleteSave(id: string): Promise<void> { const db = await open(); await new Promise<void>((res, rej) => { const tx = db.transaction('saves', 'readwrite'); tx.objectStore('saves').delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }

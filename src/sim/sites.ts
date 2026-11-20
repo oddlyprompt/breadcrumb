@@ -333,7 +333,7 @@ export function buildSites(seed: string, T: Terrain, L: Landscape, G: Geology, D
   const chunks = new Map<number, number[]>(); const byId = new Map<string, Site>();
   sites.forEach((s, i) => {
     byId.set(s.id, s);
-    let [x0, y0, x1, y1] = s.bbox;
+    let [x0, y0, x1, y1] = s.bbox; x0 -= 25; y0 -= 25; x1 += 25; y1 += 25;
     if (s.dynamic === 'river') { x0 -= 1500; y0 -= 1500; x1 += 1500; y1 += 1500; }
     else if (s.dynamic === 'beach') { x0 -= 500; y0 -= 500; x1 += 500; y1 += 500; }
     s.bbox = [x0, y0, x1, y1];
