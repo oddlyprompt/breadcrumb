@@ -64,7 +64,7 @@ export class App {
   private renderTabs() {
     this.tabsEl.innerHTML = ''; for (const p of this.panels) { if (p.id === 'dev' && !this.devOn) continue; const n = p.badge?.(this) ?? 0; const b = h('button', { class: this.tab === p.id ? 'on' : '', onClick: () => { this.tab = p.id; this.renderTabs(); this.renderPane(); this.snd.start(); this.snd.click(); } }, p.label, n ? h('span', { class: 'n' }, String(n)) : null); this.tabsEl.append(b); }
   }
-  renderPane() { const p = this.panels.find(q => q.id === this.tab) ?? this.panels[0]; const st = this.paneEl.scrollTop; this.paneEl.innerHTML = ''; p.render(this, this.paneEl); this.paneEl.scrollTop = st; }
+  renderPane() { const p = this.panels.find(q => q.id === this.tab) ?? this.panels[0]; const st = this.paneEl.scrollTop; const body = document.createElement('div'); p.render(this, body); this.paneEl.replaceChildren(body); this.paneEl.scrollTop = st; } // a fresh container per render, so event handlers bound by a panel never accumulate
   private renderToolbar() {
     this.toolbar.innerHTML = ''; if (this.view !== 'field') { this.toolbar.style.display = 'none'; return; } this.toolbar.style.display = 'flex';
     const mk = (m: Mode, label: string, key: string) => { const b = h('button', { class: this.field.mode === m ? 'on' : '', onClick: () => { this.snd.start(); this.field.setMode(m); this.renderToolbar(); this.field.cv.focus(); } }, label, h('kbd', {}, key)); this.toolbar.append(b); };
