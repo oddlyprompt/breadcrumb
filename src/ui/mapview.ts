@@ -22,15 +22,25 @@ export class MapView {
   scale = 0; ox = 0; oy = 0; // px per metre and the screen position of world (0,0)
   overlays = new Set<Overlay>(['contours']); histYear: number | null = null; histDoc: Doc | null = null;
   onHit: (h: MapHit | null) => void = () => {}; onGo: (x: number, y: number) => void = () => {};
+  private pts = new Map<number, { x: number; y: number }>(); private pinch: { d: number; mx: number; my: number } | null = null; private pinchEnded = 0;
+  private pinchState() { const [a, b] = Array.from(this.pts.values()); return { d: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; }
+  /** a comfortable local view: about `metres` across, centred on a point */
+  local(x: number, y: number, metres = 3000) { const min = Math.min(this.vw, this.vh) / SIZE * 0.9; this.centerOn(x, y, Math.max(min, Math.min(this.vw, this.vh) / metres)); }
+  zoomBy(k: number) { this.zoomAt(this.vw / 2, this.vh / 2, k); }
   private drag: { x: number; y: number; ox: number; oy: number; moved: boolean } | null = null; marker: { x: number; y: number } | null = null; private dirty = true; hover: { x: number; y: number } | null = null;
   constructor(public w: World, public g: () => GameState, host: HTMLElement) {
     this.cv = document.createElement('canvas'); host.appendChild(this.cv); this.cx = this.cv.getContext('2d')!;
     this.base = this.paintBase(); this.geol = this.paintGeology();
     const ro = new ResizeObserver(() => { this.resize(); }); ro.observe(host); this.resize(true);
     this.cv.addEventListener('wheel', e => { e.preventDefault(); const r = this.cv.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; const k = Math.exp(-e.deltaY * 0.0014); this.zoomAt(mx, my, k); }, { passive: false });
-    this.cv.addEventListener('pointerdown', e => { this.cv.setPointerCapture(e.pointerId); this.drag = { x: e.clientX, y: e.clientY, ox: this.ox, oy: this.oy, moved: false }; });
-    this.cv.addEventListener('pointermove', e => { const r = this.cv.getBoundingClientRect(); this.hover = this.toWorld(e.clientX - r.left, e.clientY - r.top); if (this.drag) { const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) this.drag.moved = true; this.ox = this.drag.ox + dx; this.oy = this.drag.oy + dy; this.clampView(); this.dirty = true; } });
-    this.cv.addEventListener('pointerup', e => { const d = this.drag; this.drag = null; if (d && !d.moved) { const r = this.cv.getBoundingClientRect(); const p = this.toWorld(e.clientX - r.left, e.clientY - r.top); this.click(p.x, p.y); } });
+    this.cv.style.touchAction = 'none';
+    this.cv.addEventListener('pointerdown', e => { this.cv.setPointerCapture(e.pointerId); this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (this.pts.size === 2) { this.pinch = this.pinchState(); this.drag = null; return; } this.drag = { x: e.clientX, y: e.clientY, ox: this.ox, oy: this.oy, moved: false }; });
+    this.cv.addEventListener('pointermove', e => { const r = this.cv.getBoundingClientRect(); this.hover = this.toWorld(e.clientX - r.left, e.clientY - r.top); if (this.pts.has(e.pointerId)) this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pinch && this.pts.size === 2) { const now = this.pinchState(); this.zoomAt(now.mx - r.left, now.my - r.top, now.d / this.pinch.d); this.ox += now.mx - this.pinch.mx; this.oy += now.my - this.pinch.my; this.clampView(); this.pinch = now; this.dirty = true; return; }
+      if (this.drag) { const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) this.drag.moved = true; this.ox = this.drag.ox + dx; this.oy = this.drag.oy + dy; this.clampView(); this.dirty = true; } });
+    const lift = (e: PointerEvent) => { this.pts.delete(e.pointerId); if (this.pts.size < 2 && this.pinch) { this.pinch = null; this.drag = null; this.pinchEnded = performance.now(); } };
+    this.cv.addEventListener('pointercancel', lift);
+    this.cv.addEventListener('pointerup', e => { lift(e); if (performance.now() - this.pinchEnded < 250) { this.drag = null; return; } const d = this.drag; this.drag = null; if (d && !d.moved) { const r = this.cv.getBoundingClientRect(); const p = this.toWorld(e.clientX - r.left, e.clientY - r.top); this.click(p.x, p.y); } });
     this.cv.addEventListener('dblclick', e => { const r = this.cv.getBoundingClientRect(); const p = this.toWorld(e.clientX - r.left, e.clientY - r.top); this.onGo(p.x, p.y); });
   }
   private paintBase(): HTMLCanvasElement {
@@ -62,7 +72,7 @@ export class MapView {
   fit() { this.scale = Math.min(this.vw, this.vh) / SIZE * 0.98; this.ox = (this.vw - SIZE * this.scale) / 2; this.oy = (this.vh - SIZE * this.scale) / 2; }
   centerOn(x: number, y: number, zoom?: number) { if (zoom) this.scale = zoom; this.ox = this.vw / 2 - x * this.scale; this.oy = this.vh / 2 - y * this.scale; this.clampView(); this.dirty = true; }
   toWorld(sx: number, sy: number) { return { x: (sx - this.ox) / this.scale, y: (sy - this.oy) / this.scale }; }
-  zoomAt(sx: number, sy: number, k: number) { const min = Math.min(this.vw, this.vh) / SIZE * 0.9; const ns = clamp(this.scale * k, min, min * 22); const wx = (sx - this.ox) / this.scale, wy = (sy - this.oy) / this.scale; this.scale = ns; this.ox = sx - wx * ns; this.oy = sy - wy * ns; this.clampView(); this.dirty = true; }
+  zoomAt(sx: number, sy: number, k: number) { const min = Math.min(this.vw, this.vh) / SIZE * 0.9; const ns = clamp(this.scale * k, min, 2.2); const wx = (sx - this.ox) / this.scale, wy = (sy - this.oy) / this.scale; this.scale = ns; this.ox = sx - wx * ns; this.oy = sy - wy * ns; this.clampView(); this.dirty = true; }
   private clampView() { const m = 80; this.ox = clamp(this.ox, this.vw - SIZE * this.scale - m, m); this.oy = clamp(this.oy, this.vh - SIZE * this.scale - m, m); }
   setOverlay(o: Overlay, on: boolean) { if (on) this.overlays.add(o); else this.overlays.delete(o); this.dirty = true; }
   invalidate() { this.dirty = true; }
@@ -117,8 +127,8 @@ export class MapView {
     }
     // known grounds: the public places where people hunt
     for (const f of g.kb) { if (!f.endsWith(':known') || !f.startsWith('site:')) continue; const st = w.sites.byId.get(f.slice(5, -6)); if (!st) continue; const x = X(st.x), y = Y(st.y);
-      c.fillStyle = '#2f6b45'; c.strokeStyle = '#f1ead0'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, y - 7); c.lineTo(x + 6, y + 4); c.lineTo(x - 6, y + 4); c.closePath(); c.fill(); c.stroke();
-      if (S > 0.0012) { c.font = 'italic 11px Georgia'; c.fillStyle = '#1f4a30'; c.strokeStyle = 'rgba(244,236,214,.9)'; c.lineWidth = 3; c.strokeText(st.name, x + 8, y + 2); c.fillText(st.name, x + 8, y + 2); } }
+      c.fillStyle = '#2f6b45'; c.strokeStyle = '#f1ead0'; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y - 11); c.lineTo(x + 9, y + 6); c.lineTo(x - 9, y + 6); c.closePath(); c.fill(); c.stroke();
+      if (S > 0.04) { c.font = 'bold 12px Georgia'; c.fillStyle = '#1f4a30'; c.strokeStyle = 'rgba(244,236,214,.95)'; c.lineWidth = 3.5; c.strokeText(st.name, x + 12, y + 2); c.fillText(st.name, x + 12, y + 2); } }
     // geographic labels
     for (const f of w.geo.features) {
       if (f.kind === 'range') { if (S > 0.012 * 0.4 + 0) { } c.font = `italic ${clamp(S * 22000, 12, 26)}px Georgia`; c.fillStyle = 'rgba(70,52,34,0.62)'; c.textAlign = 'center'; (c as any).letterSpacing = '4px'; c.fillText(f.name.toUpperCase(), X(f.x), Y(f.y)); (c as any).letterSpacing = '0px'; c.textAlign = 'start'; }

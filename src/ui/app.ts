@@ -23,7 +23,7 @@ export interface Panel { id: string; label: string; render: (app: App, el: HTMLE
 export class App {
   S: Searcher; snd = new Sound(); field!: FieldView; map!: MapView; view: 'field' | 'map' = 'field'; tab = 'pack'; selected: string | null = null; private toastEl!: HTMLElement; private toastT = 0;
   private paneEl!: HTMLElement; private tabsEl!: HTMLElement; private topEl!: HTMLElement; private viewHost!: HTMLElement; private toolbar!: HTMLElement; private mapInfo!: HTMLElement; private hudEl!: HTMLElement; private mapBar!: HTMLElement;
-  private hudHtml = ''; private hudT = 0;
+  private hudHtml = ''; private hudT = 0; private guideEl!: HTMLElement; private mapNav!: HTMLElement; private guideKey = '';
   private actions = 0; private lastSave = Date.now(); lastTier = 0; devOn = false; private panels: Panel[]; mapHit: MapHit | null = null; selDoc: string | null = null; shopBuyer = 0; devTab = 'world';
   constructor(public root: HTMLElement, public w: World, public g: GameState, public saveId: string, public onQuit: () => void) {
     this.S = new Searcher(w, g); this.snd.vol = loadVol();
@@ -39,14 +39,14 @@ export class App {
     this.field = new FieldView(this.viewHost, this.w, this.g, this.S, this.snd, { toast: (m, b) => this.toast(m, b), found: got => this.onFound(got), changed: () => this.refresh(false), feature: f => this.onFeature(f), siteEntered: (s, first) => this.onSite(s, first) });
     this.map = new MapView(this.w, () => this.g, this.viewHost); this.map.cv.style.display = 'none'; this.map.onHit = hit => { this.mapHit = hit; this.renderMapInfo(); }; this.map.onGo = (x, y) => this.travelDialog(x, y);
     this.toolbar = h('div', { class: 'toolbar' }); this.viewHost.append(this.toolbar);
-    this.hudEl = h('div', { class: 'hud tl' }); this.viewHost.append(this.hudEl); this.mapInfo = h('div', { class: 'hud bl' }); this.viewHost.append(this.mapInfo); this.mapBar = h('div', { class: 'hud tr' }); this.viewHost.append(this.mapBar);
+    this.hudEl = h('div', { class: 'hud tl' }); this.viewHost.append(this.hudEl); this.guideEl = h('div', { class: 'hud guide' }); this.viewHost.append(this.guideEl); this.mapNav = h('div', { class: 'mapnav' }); this.viewHost.append(this.mapNav); this.mapInfo = h('div', { class: 'hud bl' }); this.viewHost.append(this.mapInfo); this.mapBar = h('div', { class: 'hud tr' }); this.viewHost.append(this.mapBar);
     this.field.start(); this.field.cv.focus(); this.refresh(true);
     const loop = () => { if (this.view === 'map') this.map.draw(this.g); this.updateHud(); requestAnimationFrame(loop); }; requestAnimationFrame(loop);
     setInterval(() => { if (Date.now() - this.lastSave > 45000) this.save(); }, 5000);
   }
   setView(v: 'field' | 'map') {
     this.view = v; this.field.cv.style.display = v === 'field' ? 'block' : 'none'; this.map.cv.style.display = v === 'map' ? 'block' : 'none'; this.field.setActive(v === 'field');
-    if (v === 'map') { this.map.resize(); this.map.centerOn(this.g.x, this.g.y, Math.max(this.map.scale, 0.012)); this.map.marker = null; } else this.field.cv.focus(); this.mapHit = null; this.renderMapInfo(); this.refresh(true);
+    if (v === 'map') { this.map.resize(); this.map.local(this.g.x, this.g.y, 3000); this.map.marker = null; } else this.field.cv.focus(); this.mapHit = null; this.renderMapInfo(); this.refresh(true);
   }
   toast(msg: string, big = false) { this.toastEl.textContent = msg; this.toastEl.className = 'toast on' + (big ? ' big' : ''); clearTimeout(this.toastT); this.toastT = window.setTimeout(() => { this.toastEl.className = 'toast'; }, big ? 4200 : 2600); }
   save() { this.lastSave = Date.now(); const g = this.g; const s = this.w.H.settlements.find(q => q.id === this.w.start.settlement)!; const net = g.cash + 0; void s;
@@ -74,18 +74,48 @@ export class App {
   }
   private updateHud() {
     if (performance.now() - this.hudT < 200) return; this.hudT = performance.now();
-    if (this.view !== 'field') { if (this.hudHtml) { this.hudHtml = ''; this.hudEl.innerHTML = ''; } return; } const g = this.g, w = this.w, c = cellOf(this.field.x, this.field.y); const gr = this.S.groundAt(this.field.x, this.field.y); const acc = this.S.access(this.field.x, this.field.y);
+    if (this.view !== 'field') { if (this.hudHtml) { this.hudHtml = ''; this.hudEl.innerHTML = ''; } if (this.guideKey) { this.guideKey = ''; this.guideEl.innerHTML = ''; } return; }
+    this.updateGuide(); const g = this.g, w = this.w, c = cellOf(this.field.x, this.field.y); const gr = this.S.groundAt(this.field.x, this.field.y); const acc = this.S.access(this.field.x, this.field.y);
     const set = this.S.setup(); const dg = g.equipped.digger === 'hands' ? 'bare hands' : '';
     const html = `<div class="panel small">${esc(SED_NAMES[gr.sed])} · ${esc(VEG_NAMES[gr.veg])}<br>Mode: <b>${this.field.mode}</b>${set ? ` · ${esc(set.det.name)}` : ' · no detector'}${dg ? ' · ' + dg : ''}<br>${acc.ok ? '<span style="color:#9fd18a">Open to search</span>' : `<span style="color:#f0a090">${esc(acc.reason)}</span>`}${acc.farm ? ` <a class="lnk" id="ask" style="pointer-events:auto;color:#ffd98a">Ask permission</a>` : ''}${this.S.pending ? '<br><span class="tiny">Loading this area…</span>' : ''}</div>`;
     if (html === this.hudHtml) return; this.hudHtml = html; this.hudEl.innerHTML = html;
     const ask = this.hudEl.querySelector('#ask'); if (ask) (ask as HTMLElement).onclick = () => { import('../sim/game').then(m => { const r = m.askPermission(this.S, acc.farm!); this.toast(r.msg, r.granted); this.refresh(); }); };
   }
+  layersOpen = window.innerWidth > 900;
   private renderMapBar() {
-    this.mapBar.innerHTML = ''; if (this.view !== 'map') return; const p = h('div', { class: 'panel small' }); const toggles: Array<[string, string]> = [['contours', 'Contours'], ['geology', 'Geology'], ['history', 'Known old sites'], ['discoveries', 'My discoveries'], ['hints', 'Record hints']];
+    this.mapBar.innerHTML = ''; this.mapNav.innerHTML = ''; if (this.view !== 'map') { this.mapNav.style.display = 'none'; return; } this.mapNav.style.display = 'flex';
+    const nb = (label: string, title: string, fn: () => void) => this.mapNav.append(h('button', { title, onClick: () => { fn(); this.map.invalidate(); } }, label));
+    nb('+', 'Zoom in', () => this.map.zoomBy(1.8)); nb('−', 'Zoom out', () => this.map.zoomBy(1 / 1.8)); nb('Me', 'Back to where you are', () => this.map.local(this.g.x, this.g.y, 3000)); nb('Region', 'The whole region', () => this.map.fit()); nb(this.layersOpen ? 'Hide layers' : 'Layers', 'Map layers', () => { this.layersOpen = !this.layersOpen; this.renderMapBar(); });
+    if (!this.layersOpen) return;
+    const p = h('div', { class: 'panel small' }); const toggles: Array<[string, string]> = [['contours', 'Contours'], ['geology', 'Geology'], ['history', 'Known old sites'], ['discoveries', 'My discoveries'], ['hints', 'Record hints']];
     for (const [id, label] of toggles) { const l = h('label', { style: 'display:block;cursor:pointer' }); const cb = h('input', { type: 'checkbox' }) as HTMLInputElement; cb.checked = this.map.overlays.has(id as any); cb.onchange = () => { this.map.setOverlay(id as any, cb.checked); }; l.append(cb, ' ' + label); p.append(l); }
     const maps = this.g.docsRead.map(id => this.w.docs.find(d => d.id === id)!).filter(d => d?.mapYear); if (maps.length) { p.append(h('div', { class: 'tiny', style: 'margin-top:6px' }, 'Historical maps you have read:')); const row = h('div', { class: 'row', style: 'flex-wrap:wrap;gap:3px' }); const none = h('button', { class: 'btn small alt', onClick: () => { this.map.histYear = null; this.map.invalidate(); } }, 'Today'); row.append(none); for (const d of maps.sort((a, b) => a.year - b.year)) row.append(h('button', { class: 'btn small alt', onClick: () => { this.map.histYear = d.mapYear!; this.map.invalidate(); } }, String(d.mapYear))); p.append(row); }
     if (this.map.overlays.has('geology')) { const forms = new Map<number, string>(); const seen = new Set<number>(); const G = this.w.G; for (let i = 0; i < G.formationOf.length; i += 7) if (!this.w.T.sea[i]) seen.add(G.formationOf[i]); const lg = h('div', { class: 'tiny scrollable', style: 'margin-top:6px;max-height:160px' }); for (const id of Array.from(seen).sort((a, b) => G.formations[b].ageMa - G.formations[a].ageMa)) { const f = G.formations[id]; lg.append(h('div', { html: `<span class="swatch" style="background:${f.hex}"></span>${esc(f.name)} <span class="muted">(${esc(f.rock)}, ${Math.round(f.ageMa)} Ma)</span>` })); void forms; } p.append(lg); }
     this.mapBar.append(p);
+  }
+  /** Signposts: the nearest places you know about, with direction and distance. Tap one to head there. */
+  private gotoCache = new Map<string, { x: number; y: number }>();
+  /** A point inside a known place where searching is actually allowed (for the shore: the strip by the water), nearest the town. */
+  gotoPoint(site: Site): { x: number; y: number } {
+    const c = this.gotoCache.get(site.id); if (c) return c;
+    const town = this.w.H.settlements.find(q => q.id === (site.refs.settlement ?? this.w.start.settlement)) ?? this.w.H.settlements.find(q => q.id === this.w.start.settlement)!;
+    let best: { x: number; y: number } | null = null, bd = 1e12; const R = site.kind === 'beach' ? site.r + 420 : site.r * 0.8;
+    for (let i = 0; i < 160; i++) { const a = i * 2.39996, rr = R * Math.sqrt((i + 0.5) / 160); const x = site.x + Math.cos(a) * rr, y = site.y + Math.sin(a) * rr; if (!this.S.access(x, y).ok) continue; const d = Math.hypot(x - town.x, y - town.y); if (d < bd) { bd = d; best = { x, y }; } }
+    const res = best ?? { x: site.x, y: site.y }; this.gotoCache.set(site.id, res); return res;
+  }
+  private updateGuide() {
+    const g = this.g, w = this.w, fx = this.field.x, fy = this.field.y;
+    const known = g.kb.filter(f => f.startsWith('site:') && f.endsWith(':known')).map(f => w.sites.byId.get(f.slice(5, -6))!).filter(Boolean);
+    const here = this.S.access(fx, fy).ok;
+    const inside = here ? known.find(s => { const q = this.gotoPoint(s); return Math.hypot(q.x - fx, q.y - fy) < (s.kind === 'beach' ? 120 : s.r); }) : undefined;
+    const list = known.filter(s => s !== inside).map(s => { const q = this.gotoPoint(s); return { s, q, d: Math.hypot(q.x - fx, q.y - fy) }; }).sort((a, b) => a.d - b.d).slice(0, 3);
+    const key = (inside?.id ?? '') + list.map(q => q.s.id + Math.round(q.d / 10) + Math.round(Math.atan2(q.q.y - fy, q.q.x - fx) * 8)).join();
+    if (key === this.guideKey) return; this.guideKey = key; this.guideEl.innerHTML = '';
+    const box = h('div', { class: 'panel small' }); if (inside) box.append(h('div', { class: 'here' }, `On ${inside.name}`));
+    for (const { s, d, q } of list) { const ang = Math.atan2(q.y - fy, q.x - fx) * 180 / Math.PI + 90; const dist = d < 1000 ? `${Math.round(d / 10) * 10} m` : `${(d / 1000).toFixed(1)} km`;
+      box.append(h('button', { class: 'sign', onClick: () => { if (d > 2500) { this.travelDialog(q.x, q.y); return; } this.field.walkTarget = { x: q.x, y: q.y }; this.toast(`Walking to ${s.name}. Use the arrows or tap the ground to stop.`); } }, h('span', { class: 'arr', style: `transform:rotate(${ang.toFixed(0)}deg)` }, '▲'), ` ${s.name} · ${dist}`)); }
+    if (!list.length && !inside) box.append(h('div', {}, 'No known places nearby. Open the map.'));
+    this.guideEl.append(box);
   }
   private renderMapInfo() {
     this.mapInfo.innerHTML = ''; if (this.view !== 'map' || !this.mapHit) return; const hit = this.mapHit; const p = h('div', { class: 'panel', style: 'max-width:340px;text-align:left' }); p.innerHTML = `<b>${esc(hit.title)}</b><br>${hit.lines.map(esc).join('<br>')}`;
